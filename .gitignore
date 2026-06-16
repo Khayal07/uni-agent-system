@@ -1,0 +1,21 @@
+# Python keş və kompilyasiya faylları
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Lokal virtual mühit (əgər yaratsan)
+venv/
+.venv/
+env/
+
+# Konfiqurasiya və Gizli məlumatlar (Çox Vacib!)
+.env
+
+# IDE (VS Code və ya PyCharm) sazlamaları
+.vscode/
+.idea/
+
+# Sistem faylları
+.DS_Store
+Thumbs.db
