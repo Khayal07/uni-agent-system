@@ -1,19 +1,12 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-WORKDIR /backend
+WORKDIR /code
 
-# Sistem asılılıqlarını yükləyirik (bazaya qoşulmaq və s. üçün lazım ola bilər)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Eyni qovluqdakı requirements.txt-ni köçürüb yükləyirik
+COPY requirements.txt /code/requirements.txt
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
-# Kitabxanaları köçürüb yükləyirik
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# backend qovluğunun içindəki hər şeyi (app, tests və s.) bütöv köçürürük
+COPY . /code/
 
-# Bütün backend kodunu konteynerə köçürürük
-COPY . .
-
-# FastAPI-ı uvicorn vasitəsilə işə salırıq
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
