@@ -4,6 +4,8 @@ from typing import List
 import urllib.request
 import json
 import os
+import re  # HTML-i tamamilə təmizləmək üçün standart kitabxana
+import requests
 from . import crud, schemas, models
 from .database import SessionLocal, engine
 
@@ -58,22 +60,33 @@ def scrape_university_website(university_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail=f"Skrap xətası: {str(e)}")
 
 
-# 5. 🔥 YENİ ADDIM: HTML-İ GEMINI AI ILƏ EMAL EDİB İXTİSASLARI BAZAYA YAZMAQ
+# 5. 🔥 YENİLƏNMİŞ ADDIM: TƏMİZ MƏTNİ SƏNİN MODELİNLƏ EMAL EDİB BAZAYA YAZMAQ
 @app.post("/universities/{university_id}/process-with-ai/")
-def process_html_with_gemini(university_id: int, db: Session = Depends(get_db)):
-    # .env faylından Gemini API Key-i oxuyuruq
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=400, detail="GEMINI_API_KEY tapılmadı! .env faylını yoxlayın.")
+def process_html_with_openrouter(university_id: int, db: Session = Depends(get_db)):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key or api_key.strip() == "":
+        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY tapılmadı! .env faylını yoxlayın.")
 
-    # Bazadan bu universitetə aid ən son skrap olunmuş xam HTML-i tapırıq
     scraped_data = db.query(models.ScrapedPage).filter(models.ScrapedPage.university_id == university_id).order_by(models.ScrapedPage.scraped_at.desc()).first()
     if not scraped_data:
         raise HTTPException(status_code=404, detail="Bu universitet üçün skrap olunmuş xam HTML tapılmadı. Öncə scrape endpointini işə salın!")
 
-    # Gemini-yə tapşırıq (Prompt) veririk
+    # 🪓 ULTRA-TƏMİZLƏMƏ FİLTRİ: HTML kodlarını tamamilə qırxırıq
+    raw_html = scraped_data.raw_html
+    
+    # 1. <head>...</head> hissəsini və daxilindəki bütün lazımsız linkləri tamamilə silirik
+    cleaned_text = re.sub(r'<head\b[^>]*>.*?</head>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
+    # 2. Ssenari və stil bloklarını silirik
+    cleaned_text = re.sub(r'<script\b[^>]*>.*?</script>', '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+    cleaned_text = re.sub(r'<style\b[^>]*>.*?</style>', '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
+    # 3. GERİDƏ QALAN BÜTÜN HTML TEQLƏRİNİ SİLİRİK (Yalnız təmiz görünən yazılar qalır)
+    cleaned_text = re.sub(r'<[^>]+>', ' ', cleaned_text)
+    # 4. Artıq boşluqları sıxırıq
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+
+    # Model üçün tapşırıq (Prompt) - İndi model qarşısında təmiz mətn görəcək
     prompt = f"""
-    You are an expert AI Data Engineer. Analyze the following raw HTML from a university website and extract all academic programs (bachelor, master, or phd majors).
+    You are an expert AI Data Engineer. Analyze the following clean text extracted from a university website and extract all academic programs (bachelor, master, or phd majors).
     
     Strictly return a valid JSON array of objects, where each object has exactly these keys:
     - "faculty": Name of the faculty or department.
@@ -83,29 +96,52 @@ def process_html_with_gemini(university_id: int, db: Session = Depends(get_db)):
     - "tuition_fee": Tuition fee if mentioned, otherwise null.
     - "requirements": Any specific entry requirements mentioned, otherwise null.
 
-    Do not include any markdown formatting like ```json ... ```. Return raw JSON text only.
+    Do not include any markdown formatting like ```json ... ``` or thinking tags. Return raw JSON text only. If no programs are found, return an empty array [].
     
-    HTML Content:
-    {scraped_data.raw_html[:40000]}
+    Website Clean Text Content:
+    {cleaned_text[:40000]}
     """
 
-    # Gemini API-yə birbaşa sorğu göndərilməsi
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json"}
+        "model": "openai/gpt-oss-120b:free",  # 🔥 Sənin canavar kimi işləyən pulsuz modelin
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": 3000
     }
 
     try:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
+        response = requests.post(url, json=payload, headers=headers, timeout=45)
         
-        ai_response_text = result['candidates'][0]['content']['parts'][0]['text']
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"OpenRouter API xəta qaytardı: {response.text}"
+            )
+            
+        result = response.json()
+        ai_response_text = result['choices'][0]['message']['content'].strip()
+
+        # Model nəsə əlavə teq qoyubsa təmizləyirik
+        if "</think>" in ai_response_text:
+            ai_response_text = ai_response_text.split("</think>")[-1].strip()
+            
+        if ai_response_text.startswith("```"):
+            first_newline = ai_response_text.find("\n")
+            last_backticks = ai_response_text.rfind("```")
+            if first_newline != -1 and last_backticks != -1:
+                ai_response_text = ai_response_text[first_newline:last_backticks].strip()
+
         extracted_programs = json.loads(ai_response_text)
 
-        # Gemini-dən gələn təmiz datanı 'programs' cədvəlinə doldururuq
         saved_count = 0
         for prog in extracted_programs:
             program_schema = schemas.ProgramCreate(
@@ -122,9 +158,16 @@ def process_html_with_gemini(university_id: int, db: Session = Depends(get_db)):
 
         return {
             "status": "Uğurlu!",
-            "message": f"Gemini HTML-i təmizlədi. {saved_count} yeni ixtisas bazaya yazıldı!",
-            "programs_extracted": extracted_programs
+            "message": f"AI mətni təmizlədi. {saved_count} yeni ixtisas bazaya yazıldı!",
+            "programs_extracted": extracted_programs,
+            "AI_MODELIN_QAYTARDIGI_XAM_METN": ai_response_text,
+            "BAZADAN_AI_A_GEDEN_MƏTN_SNIPPET": cleaned_text[:1000]
         }
 
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI-dan düzgün JSON strukturu qayıtmadı. Modelin qaytardığı mətn: {ai_response_text}"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Emalı zamanı xəta: {str(e)}")
