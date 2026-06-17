@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   uni_agent_api:
     build: ./backend
@@ -5,6 +7,8 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/code
+    env_file:
+      - .env  # 🔥 Kök qovluqdakı .env faylını birbaşa oxuyub mühit dəyişənlərini içəri yükləyir!
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -13,21 +17,23 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       db:
-        condition: service_healthy  # 🔥 Baza TAM HAZIR olana qədər gözləyəcək!
+        condition: service_healthy
 
   db:
     image: postgres:15-alpine
     container_name: uni_agent_db
     ports:
       - "5433:5432"
+    env_file:
+      - .env
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:  # 🔥 Baza konteynerinin daxildə tam hazır olub-olmadığını yoxlayır
-      test: ["CMD-SHELL", "pg_isready -U user -d uni_agent_db"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"] # 🔥 Dinamik və təmiz yoxlanış
       interval: 3s
       timeout: 3s
       retries: 5
