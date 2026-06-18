@@ -11,24 +11,31 @@ class ChangeDetectorAgent:
         # 1. Həmin universitetə aid bazada artıq mövcud olan bütün ixtisasları çəkirik
         existing_programs = db.query(models.Program).filter(models.Program.university_id == university_id).all()
         
-        # 2. Sürətli axtarış (O(1) complexity) üçün lüğət (dict) yaradırıq. 
-        # Açar olaraq unikal kombinasiya götürürük: (ad, dərəcə, tədris dili)
-        existing_lookup = {
-            (p.program_name.lower().strip(), p.degree.lower().strip(), p.language.lower().strip()): p 
-            for p in existing_programs
-        }
+        # 2. TƏHLÜKƏSİZ Sürətli axtarış lüğəti (None/NULL dəyərlərə qarşı qorunma ilə)
+        existing_lookup = {}
+        for p in existing_programs:
+            # Əgər bazada hər hansı bir sütun səhvən NULL-dırsa, çökməsin deyə (p.sahə or "") edirik
+            name = (p.program_name or "").lower().strip()
+            deg = (p.degree or "").lower().strip()
+            lang = (p.language or "").lower().strip()
+            existing_lookup[(name, deg, lang)] = p
         
         report = {
             "new": [],        # Bazada heç olmayan tamamilə yeni ixtisaslar
-            "updated": [],    # Özü var, amma qiyməti və ya digər sahəsi dəyişən ixtisaslar
+            "updated": [],    # Özü var, amma qiyməti dəyişən ixtisaslar
             "unchanged_count": 0  # Hər şeyi eyni qalan ixtisasların sayı
         }
         
         # 3. Müqayisə dövrəsi
         for incoming in incoming_programs:
-            name = incoming.get("program_name", "").lower().strip()
-            deg = incoming.get("degree", "").lower().strip()
-            lang = incoming.get("language", "").lower().strip()
+            raw_name = incoming.get("program_name", "")
+            raw_deg = incoming.get("degree", "")
+            raw_lang = incoming.get("language", "")
+            
+            # Gələn datanın da təhlükəsizlik formatlanması
+            name = str(raw_name).lower().strip() if raw_name else ""
+            deg = str(raw_deg).lower().strip() if raw_deg else ""
+            lang = str(raw_lang).lower().strip() if raw_lang else ""
             
             key = (name, deg, lang)
             
@@ -38,11 +45,11 @@ class ChangeDetectorAgent:
             else:
                 # İxtisas bazada var, yoxlayaq görək qiyməti dəyişibmi?
                 db_prog = existing_lookup[key]
-                incoming_fee = str(incoming.get("tuition_fee", "0"))
-                db_fee = str(db_prog.tuition_fee) if db_prog.tuition_fee else "0"
+                incoming_fee = str(incoming.get("tuition_fee", "0")).strip()
+                db_fee = str(db_prog.tuition_fee).strip() if db_prog.tuition_fee else "0"
                 
                 if incoming_fee != db_fee:
-                    # Qiymət dəyişibsə, mövcud DB sətirinin ID-sini də ötürürük ki, SQL UPDATE edə bilsin
+                    # Qiymət dəyişibsə, mövcud DB sətirinin ID-sini ötürürük ki, SQL UPDATE edə bilsin
                     incoming["id"] = db_prog.id
                     report["updated"].append(incoming)
                 else:

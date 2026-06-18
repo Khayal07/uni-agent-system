@@ -1,20 +1,33 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Body
 from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy import func
 import urllib.request
-import json
-import os
-import re  # HTML-i tamamilə təmizləmək üçün standart kitabxana
-import requests
-from . import crud, schemas, models
+import ssl
+
+# Bizim verilənlər bazası strukturlarımız
 from .database import SessionLocal, engine
+from . import models, schemas, crud
 
-# Baza cədvəllərini yaradırıq
-models.Base.metadata.create_all(bind=engine)
+# Sənin yazdığın o 5 canavar agentin bura importu
+from .agents.research import ResearchAgent
+from .agents.extraction import ExtractionAgent
+from .agents.validation import ValidationAgent
+from .agents.change_detector import ChangeDetectorAgent
+from .agents.reviewer import ReviewerAgent
 
-app = FastAPI(title="UniAgent System API")
+from fastapi.responses import HTMLResponse
+import os
 
-# DB Bağlantı Dependency-si
+# Agentlərin instansiyalarını (instance) yaradırıq
+research_agent = ResearchAgent()
+extraction_agent = ExtractionAgent()
+validation_agent = ValidationAgent()
+change_detector_agent = ChangeDetectorAgent()
+reviewer_agent = ReviewerAgent()
+
+app = FastAPI(title="UniAgent: Multi-Agent University Data Pipeline")
+
+# DB Sessiyası üçün dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -22,152 +35,190 @@ def get_db():
     finally:
         db.close()
 
-# 1. Universitet Əlavə Etmək
-@app.post("/universities/", response_model=schemas.University)
-def create_university(university: schemas.UniversityCreate, db: Session = Depends(get_db)):
-    return crud.create_university(db=db, university=university)
-
-# 2. Universitetləri Siyahılamaq
-@app.get("/universities/", response_model=List[schemas.University])
-def read_universities(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
-    return crud.get_universities(db, skip=skip, limit=limit)
-
-# 3. İxtisas (Proqram) Əlavə Etmək
-@app.post("/programs/", response_model=schemas.Program)
-def create_program(program: schemas.ProgramCreate, db: Session = Depends(get_db)):
-    return crud.create_program(db=db, program=program)
-
-# 4. Saytı Skrap Edib Xam HTML-i Bazaya Atmaq
-@app.post("/universities/{university_id}/scrape/")
-def scrape_university_website(university_id: int, db: Session = Depends(get_db)):
-    db_uni = db.query(models.University).filter(models.University.id == university_id).first()
-    if not db_uni:
-        raise HTTPException(status_code=404, detail="Universitet tapılmadı!")
-    if not db_uni.website_url:
-        raise HTTPException(status_code=400, detail="Bu universitetin veb-sayt linki yoxdur!")
-
+def helper_scrape(url: str) -> str:
+    """Universitet saytından bloklanmadan xam HTML çəkən köməkçi funksiya"""
     try:
         req = urllib.request.Request(
-            db_uni.website_url, 
+            url, 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
-        with urllib.request.urlopen(req, timeout=15) as response:
-            html_content = response.read().decode('utf-8', errors='ignore')
-        
-        scraped_page = crud.save_scraped_page(db=db, university_id=university_id, url=db_uni.website_url, html_content=html_content)
-        return {"status": "Uğurlu!", "scraped_page_id": scraped_page.id, "html_length": len(html_content)}
+        # SSL sertifikat problemlərini keçmək üçün
+        context = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, context=context, timeout=15) as response:
+            return response.read().decode('utf-8', errors='ignore')
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Skrap xətası: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Sayt oxunarkən xəta baş verdi: {str(e)}")
 
 
-# 5. 🔥 YENİLƏNMİŞ ADDIM: TƏMİZ MƏTNİ SƏNİN MODELİNLƏ EMAL EDİB BAZAYA YAZMAQ
-@app.post("/universities/{university_id}/process-with-ai/")
-def process_html_with_openrouter(university_id: int, db: Session = Depends(get_db)):
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key or api_key.strip() == "":
-        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY tapılmadı! .env faylını yoxlayın.")
+# =====================================================================
+# FRONTEND ÜÇÜN LAZIM OLAN GET ENDPOINT-LƏRİ
+# =====================================================================
 
-    scraped_data = db.query(models.ScrapedPage).filter(models.ScrapedPage.university_id == university_id).order_by(models.ScrapedPage.scraped_at.desc()).first()
-    if not scraped_data:
-        raise HTTPException(status_code=404, detail="Bu universitet üçün skrap olunmuş xam HTML tapılmadı. Öncə scrape endpointini işə salın!")
+@app.get("/universities", response_model=list, tags=["Universities"])
+def get_universities(db: Session = Depends(get_db)):
+    """Bazadakı bütün universitetlərin siyahısını frontend üçün qaytarır"""
+    universities = db.query(models.University).all()
+    return [
+        {"id": u.id, "name": u.name, "website_url": u.website_url} 
+        for u in universities
+    ]
 
-    # 🪓 ULTRA-TƏMİZLƏMƏ FİLTRİ: HTML kodlarını tamamilə qırxırıq
-    raw_html = scraped_data.raw_html
-    
-    # 1. <head>...</head> hissəsini və daxilindəki bütün lazımsız linkləri tamamilə silirik
-    cleaned_text = re.sub(r'<head\b[^>]*>.*?</head>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
-    # 2. Ssenari və stil bloklarını silirik
-    cleaned_text = re.sub(r'<script\b[^>]*>.*?</script>', '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
-    cleaned_text = re.sub(r'<style\b[^>]*>.*?</style>', '', cleaned_text, flags=re.DOTALL | re.IGNORECASE)
-    # 3. GERİDƏ QALAN BÜTÜN HTML TEQLƏRİNİ SİLİRİK (Yalnız təmiz görünən yazılar qalır)
-    cleaned_text = re.sub(r'<[^>]+>', ' ', cleaned_text)
-    # 4. Artıq boşluqları sıxırıq
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-
-    # Model üçün tapşırıq (Prompt) - İndi model qarşısında təmiz mətn görəcək
-    prompt = f"""
-    You are an expert AI Data Engineer. Analyze the following clean text extracted from a university website and extract all academic programs (bachelor, master, or phd majors).
-    
-    Strictly return a valid JSON array of objects, where each object has exactly these keys:
-    - "faculty": Name of the faculty or department.
-    - "program_name": Name of the major/study program.
-    - "degree": Degree level (e.g., Bachelor, Master, PhD).
-    - "language": Language of instruction (e.g., Azerbaijani, English, Russian).
-    - "tuition_fee": Tuition fee if mentioned, otherwise null.
-    - "requirements": Any specific entry requirements mentioned, otherwise null.
-
-    Do not include any markdown formatting like ```json ... ``` or thinking tags. Return raw JSON text only. If no programs are found, return an empty array [].
-    
-    Website Clean Text Content:
-    {cleaned_text[:40000]}
+@app.get("/", response_class=HTMLResponse, tags=["Frontend"])
+def serve_frontend():
+    """Ana səhifəyə daxil qorunanda bizim qəşəng UI-ı ekrana basır"""
+    # HTML faylını birbaşa oxuyub brauzerə göndəririk
+    frontend_path = os.path.join(os.path.dirname(__file__), "index.html")
+    if os.path.exists(frontend_path):
+        with open(frontend_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return """
+    <body style="font-family:sans-serif; background:#111827; color:#fff; text-align:center; padding-top:50px;">
+        <h2>UniAgent UI-a Xoş Gəlmisiniz!</h2>
+        <p>Zəhmət olmasa main.py ilə eyni qovluqda 'index.html' faylını yaradın.</p>
+    </body>
     """
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "openai/gpt-oss-120b:free",  # 🔥 Sənin canavar kimi işləyən pulsuz modelin
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "max_tokens": 3000
-    }
-
+# =====================================================================
+# 1. YENİ ƏLAVƏ OLUNAN HİSSƏ: UNİVERSİTET YARATMA (CRUD) ENDPOINT-İ
+# =====================================================================
+@app.post("/universities", response_model=dict, tags=["Universities"])
+def create_university(
+    name: str = Body(..., description="Universitetin adı (Məsələn: UNEC)"), 
+    website_url: str = Body(..., description="Universitetin ana səhifə linki"), 
+    db: Session = Depends(get_db)
+):
+    """
+    Sistemə və verilənlər bazasına yeni universitet qeydiyyatdan keçirir 🏫
+    """
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=45)
+        # Pipeline-dakı website_url sütun adı ilə tam eyniləşdirildi
+        db_university = models.University(name=name, website_url=website_url)
+        db.add(db_university)
+        db.commit()
+        db.refresh(db_university)
         
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"OpenRouter API xəta qaytardı: {response.text}"
-            )
-            
-        result = response.json()
-        ai_response_text = result['choices'][0]['message']['content'].strip()
-
-        # Model nəsə əlavə teq qoyubsa təmizləyirik
-        if "</think>" in ai_response_text:
-            ai_response_text = ai_response_text.split("</think>")[-1].strip()
-            
-        if ai_response_text.startswith("```"):
-            first_newline = ai_response_text.find("\n")
-            last_backticks = ai_response_text.rfind("```")
-            if first_newline != -1 and last_backticks != -1:
-                ai_response_text = ai_response_text[first_newline:last_backticks].strip()
-
-        extracted_programs = json.loads(ai_response_text)
-
-        saved_count = 0
-        for prog in extracted_programs:
-            program_schema = schemas.ProgramCreate(
-                university_id=university_id,
-                faculty=prog.get("faculty", "Unknown"),
-                program_name=prog.get("program_name", "Unknown"),
-                degree=prog.get("degree", "Bachelor"),
-                language=prog.get("language", "Azerbaijani"),
-                tuition_fee=str(prog.get("tuition_fee")) if prog.get("tuition_fee") else None,
-                requirements=prog.get("requirements")
-            )
-            crud.create_program(db=db, program=program_schema)
-            saved_count += 1
-
+        print(f"[DB SUCCESS] -> {name} bazaya əlavə edildi. ID: {db_university.id}")
+        
         return {
-            "status": "Uğurlu!",
-            "message": f"AI mətni təmizlədi. {saved_count} yeni ixtisas bazaya yazıldı!",
-            "programs_extracted": extracted_programs,
-            "AI_MODELIN_QAYTARDIGI_XAM_METN": ai_response_text,
-            "BAZADAN_AI_A_GEDEN_MƏTN_SNIPPET": cleaned_text[:1000]
+            "status": "success",
+            "message": "Universitet uğurla bazaya qeyd edildi!",
+            "university": {
+                "id": db_university.id,
+                "name": db_university.name,
+                "website_url": db_university.website_url
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Universitet bazaya yazıla bilmədi: {str(e)}")
+
+
+# =====================================================================
+# 2. SƏNİN REZULTAT VERƏN MULTI-AGENT ENDPOINT-İN
+# =====================================================================
+@app.post("/universities/{university_id}/run-agent-pipeline", response_model=dict, tags=["Agent Pipeline"])
+def run_university_agent_pipeline(university_id: int, db: Session = Depends(get_db)):
+    """
+    RƏSMƏN MULTI-AGENT ZƏNCİRİNİ BAŞLADAN ƏSAS ENDPOINT 🔥
+    """
+    # 1. Universitet məlumatını bazadan çəkirik
+    db_university = db.query(models.University).filter(models.University.id == university_id).first()
+    if not db_university:
+        raise HTTPException(status_code=404, detail="Universitet bazada tapılmadı!")
+
+    base_url = db_university.website_url
+    print(f"\n[START PIPELINE] -> {db_university.name} üçün proses başladıldı...")
+
+    # ==========================================
+    # STAGE 1: ANA SƏHİFƏNİN SKRAP EDİLMƏSİ
+    # ==========================================
+    home_html = helper_scrape(base_url)
+
+    # ==========================================
+    # STAGE 2: RESEARCH AGENT (Kəşfiyyat)
+    # ==========================================
+    # Agent ana səhifədəki linkləri gəzir və ixtisas olan səhifəni təyin edir
+    target_url = research_agent.discover_specialty_url(home_html, base_url)
+    
+    # ==========================================
+    # STAGE 3: HƏDƏF SƏHİFƏNİN SKRAP EDİLMƏSİ
+    # ==========================================
+    # Əgər fərqli alt link tapıbsa, oranı skrap edirik, tapmayıbsa elə ana səhifəni
+    if target_url != base_url:
+        print(f"[Pipeline]: Alt səhifə skrap edilir -> {target_url}")
+        target_html = helper_scrape(target_url)
+    else:
+        target_html = home_html
+
+    # ==========================================
+    # STAGE 4: EXTRACTION AGENT (Məlumat Çıxarma)
+    # ==========================================
+    raw_programs = extraction_agent.extract_programs(target_html)
+    if not raw_programs:
+        return {
+            "status": "warning",
+            "message": "Model mətndən heç bir ixtisas qopara bilmədi.",
+            "reviewer_report": "[RƏDD EDİLDİ] Data tapılmadı."
         }
 
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI-dan düzgün JSON strukturu qayıtmadı. Modelin qaytardığı mətn: {ai_response_text}"
+    # ==========================================
+    # STAGE 5: VALIDATION AGENT (Məlumat Yoxlaması)
+    # ==========================================
+    valid_programs = validation_agent.validate_data(raw_programs)
+
+    # ==========================================
+    # STAGE 6: CHANGE DETECTOR AGENT (Dəyişiklik Təyini)
+    # ==========================================
+    change_report = change_detector_agent.detect_changes(db, university_id, valid_programs)
+
+    # ==========================================
+    # STAGE 7: BAZAYA YAZILMA (INTEGRATION)
+    # ==========================================
+    # A) Tamamilə yeni ixtisasları əlavə edirik
+    for new_prog in change_report["new"]:
+        db_program = models.Program(
+            university_id=university_id,
+            faculty=new_prog.get("faculty"),
+            program_name=new_prog.get("program_name"),
+            degree=new_prog.get("degree"),
+            language=new_prog.get("language"),
+            tuition_fee=new_prog.get("tuition_fee"),
+            requirements=new_prog.get("requirements")
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Emalı zamanı xəta: {str(e)}")
+        db.add(db_program)
+
+    # B) Qiyməti dəyişən ixtisasları UPDATE edirik
+    for updated_prog in change_report["updated"]:
+        db_prog_row = db.query(models.Program).filter(models.Program.id == updated_prog["id"]).first()
+        if db_prog_row:
+            db_prog_row.tuition_fee = updated_prog.get("tuition_fee")
+            # Qiymət dəyişəndə zaman damğasını yeniləyirik
+            db_prog_row.extracted_at = func.now()
+
+    db.commit()
+
+    # ==========================================
+    # STAGE 8: REVIEWER AGENT (Yekun Hesabat)
+    # ==========================================
+    final_report = reviewer_agent.review_pipeline(
+        university_name=db_university.name,
+        target_url=target_url,
+        total_valid=len(valid_programs),
+        change_report=change_report
+    )
+
+    print(f"[PIPELINE SUCCESS] -> Proses uğurla başa çatdı.\n")
+
+    # İdarəçi heyətinə və ya Frontend-ə qaytarılacaq yekun cavab
+    return {
+        "status": "success",
+        "university_name": db_university.name,
+        "source_url_used": target_url,
+        "metrics": {
+            "total_processed": len(valid_programs),
+            "new_added": len(change_report["new"]),
+            "updated_fees": len(change_report["updated"]),
+            "unchanged": change_report["unchanged_count"]
+        },
+        "reviewer_report": final_report
+    }
