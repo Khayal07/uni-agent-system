@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -35,10 +35,13 @@ class Program(Base):
     university_id = Column(Integer, ForeignKey("universities.id"))
     faculty = Column(String, nullable=True)      # Məs: İnformasiya Texnologiyaları
     program_name = Column(String, nullable=False) # Məs: Süni İntellekt Mühəndisliyi
-    degree = Column(String, nullable=True)       # Bachelor, Master, PhD
+    degree = Column(String, nullable=True)        # Bachelor, Master, PhD
     language = Column(String, nullable=True)     # English, Azerbaijani və s.
     tuition_fee = Column(String, nullable=True)  # Təhsil haqqı qiyməti
     requirements = Column(Text, nullable=True)   # Qəbul şərtləri (TOEFL, GPA və s.)
     extracted_at = Column(DateTime, default=datetime.utcnow)
+    
+    confidence_score = Column(Float, nullable=True, default=1.0)
+    status = Column(String, nullable=True, default="approved")  # approved, pending_review
 
     university = relationship("University", back_populates="programs")

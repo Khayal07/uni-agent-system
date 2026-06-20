@@ -33,7 +33,6 @@
     <main class="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         <div class="lg:col-span-4 space-y-6">
-            
             <div class="bg-gray-800/40 border border-gray-800 rounded-2xl p-5 backdrop-blur-sm">
                 <h2 class="text-md font-semibold mb-4 flex items-center text-gray-200">
                     <i class="fas fa-university text-cyan-500 mr-2"></i> Yeni Universitet Əlavə Et
@@ -61,11 +60,9 @@
                     <p class="text-sm text-gray-500 italic">Yüklənir...</p>
                 </div>
             </div>
-
         </div>
 
         <div id="resultsArea" class="lg:col-span-8 space-y-6 hidden">
-            
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div class="bg-gray-800/30 border border-gray-800 p-4 rounded-2xl text-center">
                     <p class="text-xs text-gray-400 mb-1">Ümumi İxtisas</p>
@@ -91,53 +88,71 @@
                         <i class="fas fa-clipboard-check text-emerald-400 text-lg"></i>
                         <h3 class="font-semibold text-lg text-gray-200">Reviewer Agent Hesabatı</h3>
                     </div>
-                    <span id="uniBadge" class="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full font-mono">UNEC</span>
+                    <span id="uniBadge" class="text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full font-mono">-</span>
                 </div>
-                
                 <div id="reportText" class="text-sm leading-relaxed text-gray-300 bg-gray-900/50 p-4 rounded-xl border border-gray-800 font-sans whitespace-pre-line">
                     Agent icmalı burada görünəcək...
                 </div>
-
                 <div class="text-xs text-gray-500 flex items-center justify-between pt-2">
                     <span>Mənbə Link: <a id="usedUrl" href="#" target="_blank" class="text-cyan-400 hover:underline">Keçid et</a></span>
                 </div>
             </div>
 
+            <div class="bg-gray-800/40 border border-gray-800 rounded-2xl p-6 backdrop-blur-sm space-y-4">
+                <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
+                    <i class="fas fa-user-check text-amber-400 text-lg"></i>
+                    <h3 class="font-semibold text-lg text-gray-200">İnsan Təsdiqi Paneli (Şübhəli / Aşağı Etibarlılıqlı Məlumatlar)</h3>
+                </div>
+                <div id="pendingContainer" class="space-y-3 max-h-[250px] overflow-y-auto pr-2">
+                    <p class="text-xs text-gray-500 italic">Hazırda təsdiq gözləyən kritik data yoxdur.</p>
+                </div>
+            </div>
         </div>
 
         <div id="emptyArea" class="lg:col-span-8 bg-gray-800/20 border border-dashed border-gray-800 rounded-2xl p-12 flex flex-col items-center justify-center text-center">
             <i class="fas fa-bolt text-4xl text-gray-700 mb-4 animate-bounce"></i>
             <h3 class="text-lg font-medium text-gray-400">Pipeline İşə Salınmayıb</h3>
-            <p class="text-sm text-gray-500 max-w-sm mt-1">Soldakı siyahıdan bir universitet seçib "Agenti Qızışdır" düyməsinə klikləyin.</p>
+            <p class="text-sm text-gray-500 max-w-sm mt-1">Soldakı siyahıdan bir universitet seçib "Başlat" düyməsinə klikləyin.</p>
         </div>
 
     </main>
 
-    <div id="loadingOverlay" class="fixed inset-0 bg-gray-900/80 backdrop-blur-md hidden flex-col items-center justify-center z-50">
-        <div class="relative flex items-center justify-center mb-4">
-            <div class="w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin"></div>
-            <i class="fas fa-brain text-xl text-cyan-400 absolute"></i>
+    <div id="loadingOverlay" class="fixed inset-0 bg-gray-950/80 backdrop-blur-xl hidden flex flex-col items-center justify-center z-50 transition-all duration-300">
+        <div class="bg-gray-950/60 border border-gray-800/80 p-8 rounded-3xl shadow-2xl shadow-cyan-500/10 flex flex-col items-center max-w-sm w-full mx-4 text-center ring-1 ring-white/5 relative overflow-hidden">
+            
+            <div class="absolute -top-12 -left-12 w-24 h-24 bg-cyan-500/20 rounded-full blur-2xl"></div>
+            <div class="absolute -bottom-12 -right-12 w-24 h-24 bg-blue-500/20 rounded-full blur-2xl"></div>
+
+            <div class="relative flex items-center justify-center mb-6">
+                <div class="w-20 h-20 border-4 border-cyan-500/10 border-t-cyan-500 border-r-cyan-500 rounded-full animate-spin shadow-[0_0_20px_rgba(6,182,212,0.2)]"></div>
+                <div class="w-14 h-14 border-4 border-dashed border-blue-500/20 border-b-blue-400 rounded-full animate-spin absolute" style="animation-direction: reverse; animation-duration: 1.5s;"></div>
+                <i class="fas fa-brain text-2xl text-cyan-400 absolute drop-shadow-[0_0_12px_rgba(6,182,212,0.6)] animate-pulse"></i>
+            </div>
+
+            <h3 class="text-lg font-semibold tracking-wide bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent mb-1">Agentlər İş Başındadır</h3>
+            <p class="text-sm text-cyan-400 font-mono animate-pulse mb-4 tracking-wider">5 Agent Saytı Gəzir...</p>
+            
+            <div class="w-full bg-gray-850 h-1 rounded-full overflow-hidden relative border border-gray-800">
+                <div class="bg-gradient-to-r from-cyan-500 via-blue-500 to-cyan-500 h-full w-full absolute top-0 left-0 -translate-x-full animate-[loadingBar_2.5s_infinite_ease-in-out]"></div>
+            </div>
+
+            <p class="text-[11px] text-gray-500 mt-4 leading-relaxed">Süni intellekt strukturu analiz edir.<br>Zəhmət olmasa 10-15 saniyə gözləyin.</p>
         </div>
-        <p class="text-md font-medium text-gray-200 animate-pulse">5 Canavar Agent Saytı Gəzir...</p>
-        <p class="text-xs text-gray-500 mt-1">Bu proses 10-15 saniyə çəkə bilər, zəhmət olmasa gözləyin.</p>
     </div>
 
     <script>
         const API_BASE = window.location.origin;
 
-        // 1. Universitetləri Siyahıya Yükləyən Funksiya
         async function fetchUniversities() {
             try {
                 const res = await fetch(`${API_BASE}/universities`);
                 const data = await res.json();
                 const listDiv = document.getElementById('uniList');
                 listDiv.innerHTML = '';
-
                 if(data.length === 0) {
                     listDiv.innerHTML = '<p class="text-xs text-gray-500 italic p-2">Hələ universitet yoxdur.</p>';
                     return;
                 }
-
                 data.forEach(uni => {
                     listDiv.innerHTML += `
                         <div class="bg-gray-900/50 border border-gray-800 hover:border-gray-700 p-3 rounded-xl flex justify-between items-center transition group">
@@ -151,83 +166,97 @@
                         </div>
                     `;
                 });
-            } catch (err) {
-                console.error("Universitetlər gəlmədi:", err);
-            }
+            } catch (err) { console.error(err); }
         }
 
-        // 2. Yeni Universitet Əlavə Edən Funksiya
         async function addUniversity() {
             const name = document.getElementById('uniName').value.trim();
             const url = document.getElementById('uniUrl').value.trim();
-
-            if(!name || !url) {
-                alert("Xanaları boş qoyma, qaqa!");
-                return;
-            }
-
+            if(!name || !url) return alert("Xanaları doldur, qaqa!");
             try {
                 const res = await fetch(`${API_BASE}/universities`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name, website_url: url })
                 });
-                
                 if(res.ok) {
                     document.getElementById('uniName').value = '';
                     document.getElementById('uniUrl').value = '';
-                    fetchUniversities(); // Siyahını yenilə
-                } else {
-                    const errData = await res.json();
-                    alert("Xəta: " + errData.detail);
+                    fetchUniversities();
                 }
-            } catch (err) {
-                alert("İstək uğursuz oldu.");
-            }
+            } catch (err) { alert("Xəta!"); }
         }
 
-        // 3. Multi-Agent Pipeline-ı Qızışdıran Əsas Funksiya
         async function runPipeline(id) {
             const loading = document.getElementById('loadingOverlay');
-            const emptyArea = document.getElementById('emptyArea');
-            const resultsArea = document.getElementById('resultsArea');
-
-            loading.classList.remove('hidden'); // Loader aç
-
+            loading.classList.remove('hidden');
             try {
-                const res = await fetch(`${API_BASE}/universities/${id}/run-agent-pipeline`, {
-                    method: 'POST'
-                });
+                const res = await fetch(`${API_BASE}/universities/${id}/run-agent-pipeline`, { method: 'POST' });
                 const data = await res.json();
-
                 if(data.status === 'success') {
-                    // Metrikləri doldur
                     document.getElementById('mProcessed').innerText = data.metrics.total_processed;
                     document.getElementById('mNew').innerText = data.metrics.new_added;
                     document.getElementById('mUpdated').innerText = data.metrics.updated_fees;
                     document.getElementById('mUnchanged').innerText = data.metrics.unchanged;
                     
-                    // Hesabatı doldur
                     document.getElementById('uniBadge').innerText = data.university_name;
                     document.getElementById('reportText').innerText = data.reviewer_report;
                     document.getElementById('usedUrl').href = data.source_url_used;
                     document.getElementById('usedUrl').innerText = data.source_url_used;
 
-                    // Panelləri göstər/gizlə
-                    emptyArea.classList.add('hidden');
-                    resultsArea.classList.remove('hidden');
-                } else {
-                    alert("Pipeline xəbərdarlıq qaytardı: " + data.message);
+                    document.getElementById('emptyArea').classList.add('hidden');
+                    document.getElementById('resultsArea').classList.remove('hidden');
+                    
+                    // Pipeline bitəndə təsdiq gözləyən dataları da yenilə
+                    fetchPendingPrograms();
                 }
-            } catch (err) {
-                alert("Agentlər işləyərkən daxili server xətası baş verdi!");
-            } finally {
-                loading.classList.add('hidden'); // Loader bağla
-            }
+            } catch (err) { alert("Daxili xəta!"); }
+            finally { loading.classList.add('hidden'); }
         }
 
-        // Səhifə açılanda universitetləri yüklə
-        window.onload = fetchUniversities;
+        // TƏSDİQ GÖZLƏYƏN PROQRAMLARI ÇƏKƏN FUNKSİYA
+        async function fetchPendingPrograms() {
+            try {
+                const res = await fetch(`${API_BASE}/programs/pending`);
+                const data = await res.json();
+                const container = document.getElementById('pendingContainer');
+                container.innerHTML = '';
+                
+                if(data.length === 0) {
+                    container.innerHTML = '<p class="text-xs text-gray-500 italic">Hazırda təsdiq gözləyən kritik data yoxdur.</p>';
+                    return;
+                }
+
+                data.forEach(p => {
+                    container.innerHTML += `
+                        <div class="bg-gray-900/60 border border-gray-800 p-3 rounded-xl flex justify-between items-center text-sm">
+                            <div>
+                                <span class="text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono mr-1">Score: ${p.confidence_score}</span>
+                                <strong class="text-gray-200">${p.university_name}</strong> - <span class="text-gray-300">${p.program_name}</span>
+                                <p class="text-xs text-gray-500">${p.faculty || 'Fakültə qeyd edilməyib'} | Qiymət: ${p.tuition_fee || 'Yoxdur'}</p>
+                            </div>
+                            <button onclick="approveProgram(${p.id})" class="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white border border-emerald-500/30 px-3 py-1 rounded-lg text-xs transition font-medium">
+                                <i class="fas fa-check mr-1"></i> Təsdiqlə
+                            </button>
+                        </div>
+                    `;
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        async function approveProgram(id) {
+            try {
+                const res = await fetch(`${API_BASE}/programs/${id}/approve`, { method: 'POST' });
+                if(res.ok) {
+                    fetchPendingPrograms(); // Siyahını anlıq yenilə
+                }
+            } catch (err) { alert("Təsdiqləmə uğursuz oldu"); }
+        }
+
+        window.onload = () => {
+            fetchUniversities();
+            fetchPendingPrograms();
+        };
     </script>
 </body>
 </html>
