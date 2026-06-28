@@ -1,3 +1,7 @@
+# Test artefaktları
+.playwright-mcp/
+*.db
+
 # Python keş və kompilyasiya faylları
 __pycache__/
 *.py[cod]
