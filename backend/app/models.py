@@ -38,10 +38,33 @@ class Program(Base):
     degree = Column(String, nullable=True)        # Bachelor, Master, PhD
     language = Column(String, nullable=True)     # English, Azerbaijani və s.
     tuition_fee = Column(String, nullable=True)  # Təhsil haqqı qiyməti
-    requirements = Column(Text, nullable=True)   # Qəbul şərtləri (TOEFL, GPA və s.)
+    requirements = Column(Text, nullable=True)   # Qəbul şərtləri (ümumi qeyd)
+
+    # Spec-in tələb etdiyi ayrıca məlumat sahələri
+    application_deadline = Column(String, nullable=True)  # Müraciət son tarixi
+    gpa_requirement = Column(String, nullable=True)       # Minimum GPA tələbi
+    documents_required = Column(Text, nullable=True)      # Tələb olunan sənədlər
+
     extracted_at = Column(DateTime, default=datetime.utcnow)
-    
+
     confidence_score = Column(Float, nullable=True, default=1.0)
-    status = Column(String, nullable=True, default="approved")  # approved, pending_review
+    # Sahə-səviyyə etibarlılıq balları (validation evidence) — JSON mətn kimi saxlanır
+    field_confidence = Column(Text, nullable=True)
+    status = Column(String, nullable=True, default="approved")  # approved, pending_review, rejected
 
     university = relationship("University", back_populates="programs")
+
+
+class ChangeLog(Base):
+    """Köhnə↔Yeni dəyişikliklərin auditi (müqayisə paneli və yanlış xəbərdarlıq ölçümü üçün)"""
+    __tablename__ = "change_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    program_id = Column(Integer, ForeignKey("programs.id", ondelete="CASCADE"))
+    university_id = Column(Integer, ForeignKey("universities.id", ondelete="CASCADE"))
+    field_name = Column(String, nullable=False)   # Dəyişən sahənin adı (məs: tuition_fee)
+    old_value = Column(Text, nullable=True)        # Əvvəlki dəyər
+    new_value = Column(Text, nullable=True)        # Yeni dəyər
+    detected_at = Column(DateTime, default=datetime.utcnow)
+
+    program = relationship("Program")
