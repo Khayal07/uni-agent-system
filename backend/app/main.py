@@ -339,6 +339,21 @@ def seed_database(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/reset", response_model=dict, tags=["Seed / Demo"])
+def reset_database(db: Session = Depends(get_db)):
+    """Bütün məlumatı tam sıfırlayır (universitetlər, proqramlar, səhifələr, dəyişiklik jurnalı).
+
+    Övladları əvvəl silirik ki, xarici açar (FK) məhdudiyyəti pozulmasın."""
+    deleted = {
+        "change_logs": db.query(models.ChangeLog).delete(),
+        "programs": db.query(models.Program).delete(),
+        "scraped_pages": db.query(models.ScrapedPage).delete(),
+        "universities": db.query(models.University).delete(),
+    }
+    db.commit()
+    return {"status": "success", "message": "Baza tam sıfırlandı.", "deleted": deleted}
+
+
 @app.post("/universities/{university_id}/simulate-update", response_model=dict, tags=["Seed / Demo"])
 def simulate_update(university_id: int, db: Session = Depends(get_db)):
     """Sonrakı bir 'skrap'ı təqlid edir (qiymət/son tarix dəyişikliyi + yeni ixtisas).
