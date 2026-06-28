@@ -5,7 +5,7 @@ import json
 class ReviewerAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
-        self.model = "openai/gpt-oss-120b:free"
+        self.model = os.getenv("OPENROUTER_MODEL_NAME", "openrouter/free")
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def review_pipeline(self, university_name: str, target_url: str, total_valid: int,

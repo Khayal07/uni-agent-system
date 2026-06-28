@@ -7,7 +7,7 @@ from .extraction import parse_json_block
 class ResearchAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
-        self.model = "openai/gpt-oss-120b:free"
+        self.model = os.getenv("OPENROUTER_MODEL_NAME", "openrouter/free")
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def _raw_hrefs(self, raw_html: str) -> list:

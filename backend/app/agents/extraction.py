@@ -32,7 +32,7 @@ def parse_json_block(text: str):
 class ExtractionAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
-        self.model = "openai/gpt-oss-120b:free"
+        self.model = os.getenv("OPENROUTER_MODEL_NAME", "openrouter/free")
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def clean_html(self, raw_html: str) -> str:
