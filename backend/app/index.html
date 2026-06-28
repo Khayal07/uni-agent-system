@@ -52,6 +52,10 @@
                 </div>
             </div>
 
+            <button onclick="seedDatabase()" class="w-full bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700 text-gray-300 text-sm font-medium py-2 rounded-xl transition flex items-center justify-center">
+                <i class="fas fa-database mr-2 text-cyan-400"></i> Demo Datasını Yüklə (6 universitet, 30+ ixtisas)
+            </button>
+
             <div class="bg-gray-800/40 border border-gray-800 rounded-2xl p-5 backdrop-blur-sm flex flex-col max-h-[400px]">
                 <h2 class="text-md font-semibold mb-3 flex items-center text-gray-200">
                     <i class="fas fa-list-ul text-cyan-500 mr-2"></i> Mövcud Universitetlər
@@ -95,6 +99,40 @@
                 </div>
                 <div class="text-xs text-gray-500 flex items-center justify-between pt-2">
                     <span>Mənbə Link: <a id="usedUrl" href="#" target="_blank" class="text-cyan-400 hover:underline">Keçid et</a></span>
+                </div>
+            </div>
+
+            <div class="bg-gray-800/40 border border-gray-800 rounded-2xl p-6 backdrop-blur-sm space-y-4">
+                <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
+                    <i class="fas fa-table text-cyan-400 text-lg"></i>
+                    <h3 class="font-semibold text-lg text-gray-200">Çıxarılmış Proqramlar</h3>
+                </div>
+                <div class="overflow-x-auto max-h-[320px] overflow-y-auto">
+                    <table class="w-full text-xs text-left">
+                        <thead class="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-800">
+                            <tr>
+                                <th class="py-2 pr-2">İxtisas</th>
+                                <th class="py-2 px-2">Səviyyə</th>
+                                <th class="py-2 px-2">Dil</th>
+                                <th class="py-2 px-2">Təhsil haqqı</th>
+                                <th class="py-2 px-2">Son tarix</th>
+                                <th class="py-2 px-2">GPA</th>
+                                <th class="py-2 px-2">Conf.</th>
+                                <th class="py-2 pl-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="programsBody" class="text-gray-300"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="bg-gray-800/40 border border-gray-800 rounded-2xl p-6 backdrop-blur-sm space-y-4">
+                <div class="flex items-center space-x-2 border-b border-gray-800 pb-3">
+                    <i class="fas fa-code-compare text-blue-400 text-lg"></i>
+                    <h3 class="font-semibold text-lg text-gray-200">Dəyişiklik Tarixçəsi (Köhnə → Yeni)</h3>
+                </div>
+                <div id="changesContainer" class="space-y-2 max-h-[250px] overflow-y-auto pr-2">
+                    <p class="text-xs text-gray-500 italic">Hələ heç bir dəyişiklik aşkarlanmayıb. Eyni universiteti təkrar işə salanda dəyişikliklər burada görünəcək.</p>
                 </div>
             </div>
 
@@ -160,13 +198,50 @@
                                 <p class="text-sm font-medium text-gray-200 truncate">${uni.name}</p>
                                 <p class="text-xs text-gray-500 truncate font-mono">${uni.website_url}</p>
                             </div>
-                            <button onclick="runPipeline(${uni.id})" class="bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500 hover:text-white border border-cyan-500/20 text-xs px-2.5 py-1.5 rounded-lg transition shrink-0 font-medium">
-                                <i class="fas fa-play mr-1 text-[10px]"></i> Başlat
-                            </button>
+                            <div class="flex gap-1.5 shrink-0">
+                                <button onclick="runPipeline(${uni.id})" class="bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500 hover:text-white border border-cyan-500/20 text-xs px-2.5 py-1.5 rounded-lg transition font-medium">
+                                    <i class="fas fa-play mr-1 text-[10px]"></i> Başlat
+                                </button>
+                                <button onclick="simulateUpdate(${uni.id})" title="Növbəti skrapı təqlid et (dəyişiklik aşkarlama)" class="bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/20 text-xs px-2 py-1.5 rounded-lg transition font-medium">
+                                    <i class="fas fa-rotate text-[10px]"></i>
+                                </button>
+                            </div>
                         </div>
                     `;
                 });
             } catch (err) { console.error(err); }
+        }
+
+        async function seedDatabase() {
+            try {
+                const res = await fetch(`${API_BASE}/seed`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(`Demo datası yükləndi! ${data.universities_added} universitet, ${data.programs_added} ixtisas əlavə olundu.`);
+                    fetchUniversities();
+                }
+            } catch (err) { alert("Seed uğursuz oldu"); }
+        }
+
+        async function simulateUpdate(id) {
+            try {
+                const res = await fetch(`${API_BASE}/universities/${id}/simulate-update`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'warning') { alert(data.message); return; }
+                if (res.ok) {
+                    alert(`Simulyasiya bitdi! Yeni: ${data.metrics.new_added}, Dəyişən sahə: ${data.metrics.updated_fields}`);
+                    runPipelineRefresh(id);
+                }
+            } catch (err) { alert("Simulyasiya uğursuz oldu"); }
+        }
+
+        // Pipeline işə salmadan yalnız nəticə panellərini yeniləyir (simulyasiyadan sonra)
+        function runPipelineRefresh(id) {
+            document.getElementById('emptyArea').classList.add('hidden');
+            document.getElementById('resultsArea').classList.remove('hidden');
+            fetchPrograms(id);
+            fetchChanges(id);
+            fetchPendingPrograms();
         }
 
         async function addUniversity() {
@@ -206,12 +281,85 @@
 
                     document.getElementById('emptyArea').classList.add('hidden');
                     document.getElementById('resultsArea').classList.remove('hidden');
-                    
-                    // Pipeline bitəndə təsdiq gözləyən dataları da yenilə
+
+                    // Pipeline bitəndə proqramları, dəyişiklikləri və təsdiq gözləyənləri yenilə
+                    fetchPrograms(id);
+                    fetchChanges(id);
                     fetchPendingPrograms();
+                } else {
+                    alert(data.message || "Pipeline tamamlanmadı.");
                 }
             } catch (err) { alert("Daxili xəta!"); }
             finally { loading.classList.add('hidden'); }
+        }
+
+        // ÇIXARILMIŞ PROQRAMLARI CƏDVƏLDƏ GÖSTƏR
+        function confColor(score) {
+            if (score === null || score === undefined) return 'text-gray-400';
+            if (score >= 0.75) return 'text-emerald-400';
+            if (score >= 0.5) return 'text-amber-400';
+            return 'text-red-400';
+        }
+
+        async function fetchPrograms(uniId) {
+            try {
+                const res = await fetch(`${API_BASE}/universities/${uniId}/programs`);
+                const data = await res.json();
+                const body = document.getElementById('programsBody');
+                body.innerHTML = '';
+                if (data.length === 0) {
+                    body.innerHTML = '<tr><td colspan="8" class="py-3 text-gray-500 italic">Proqram tapılmadı.</td></tr>';
+                    return;
+                }
+                data.forEach(p => {
+                    const statusBadge = p.status === 'pending_review'
+                        ? '<span class="bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded">gözləyir</span>'
+                        : p.status === 'rejected'
+                        ? '<span class="bg-red-500/10 text-red-400 px-1.5 py-0.5 rounded">rədd</span>'
+                        : '<span class="bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded">təsdiq</span>';
+                    body.innerHTML += `
+                        <tr class="border-b border-gray-800/50 hover:bg-gray-900/30">
+                            <td class="py-2 pr-2 font-medium text-gray-200">${p.program_name || '-'}</td>
+                            <td class="py-2 px-2">${p.degree || '-'}</td>
+                            <td class="py-2 px-2">${p.language || '-'}</td>
+                            <td class="py-2 px-2">${p.tuition_fee || '-'}</td>
+                            <td class="py-2 px-2">${p.application_deadline || '-'}</td>
+                            <td class="py-2 px-2">${p.gpa_requirement || '-'}</td>
+                            <td class="py-2 px-2 font-mono ${confColor(p.confidence_score)}">${p.confidence_score ?? '-'}</td>
+                            <td class="py-2 pl-2 text-[10px] font-mono">${statusBadge}</td>
+                        </tr>
+                    `;
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        // KÖHNƏ → YENİ DƏYİŞİKLİKLƏRİ GÖSTƏR
+        async function fetchChanges(uniId) {
+            try {
+                const res = await fetch(`${API_BASE}/universities/${uniId}/changes`);
+                const data = await res.json();
+                const container = document.getElementById('changesContainer');
+                container.innerHTML = '';
+                if (data.length === 0) {
+                    container.innerHTML = '<p class="text-xs text-gray-500 italic">Hələ heç bir dəyişiklik aşkarlanmayıb. Eyni universiteti təkrar işə salanda dəyişikliklər burada görünəcək.</p>';
+                    return;
+                }
+                data.forEach(c => {
+                    container.innerHTML += `
+                        <div class="bg-gray-900/60 border border-gray-800 p-3 rounded-xl text-xs">
+                            <div class="flex justify-between items-center mb-1">
+                                <strong class="text-gray-200">${c.program_name || 'Proqram'}</strong>
+                                <span class="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded font-mono">${c.field_name}</span>
+                            </div>
+                            <div class="flex items-center gap-2 font-mono">
+                                <span class="text-red-400 line-through">${c.old_value || '∅'}</span>
+                                <i class="fas fa-arrow-right text-gray-600 text-[10px]"></i>
+                                <span class="text-emerald-400">${c.new_value || '∅'}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (err) { console.error(err); }
         }
 
         // TƏSDİQ GÖZLƏYƏN PROQRAMLARI ÇƏKƏN FUNKSİYA
@@ -229,15 +377,20 @@
 
                 data.forEach(p => {
                     container.innerHTML += `
-                        <div class="bg-gray-900/60 border border-gray-800 p-3 rounded-xl flex justify-between items-center text-sm">
-                            <div>
-                                <span class="text-[10px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-mono mr-1">Score: ${p.confidence_score}</span>
+                        <div class="bg-gray-900/60 border border-gray-800 p-3 rounded-xl flex justify-between items-center text-sm gap-3">
+                            <div class="min-w-0">
+                                <span class="text-[10px] bg-amber-500/10 ${confColor(p.confidence_score)} px-1.5 py-0.5 rounded font-mono mr-1">Score: ${p.confidence_score ?? '-'}</span>
                                 <strong class="text-gray-200">${p.university_name}</strong> - <span class="text-gray-300">${p.program_name}</span>
-                                <p class="text-xs text-gray-500">${p.faculty || 'Fakültə qeyd edilməyib'} | Qiymət: ${p.tuition_fee || 'Yoxdur'}</p>
+                                <p class="text-xs text-gray-500">${p.faculty || 'Fakültə qeyd edilməyib'} | Qiymət: ${p.tuition_fee || 'Yoxdur'} | Dil: ${p.language || '-'} | Son tarix: ${p.application_deadline || '-'}</p>
                             </div>
-                            <button onclick="approveProgram(${p.id})" class="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white border border-emerald-500/30 px-3 py-1 rounded-lg text-xs transition font-medium">
-                                <i class="fas fa-check mr-1"></i> Təsdiqlə
-                            </button>
+                            <div class="flex gap-1.5 shrink-0">
+                                <button onclick="approveProgram(${p.id})" class="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white border border-emerald-500/30 px-3 py-1 rounded-lg text-xs transition font-medium">
+                                    <i class="fas fa-check mr-1"></i> Təsdiqlə
+                                </button>
+                                <button onclick="rejectProgram(${p.id})" class="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white border border-red-500/30 px-3 py-1 rounded-lg text-xs transition font-medium">
+                                    <i class="fas fa-xmark mr-1"></i> Rədd et
+                                </button>
+                            </div>
                         </div>
                     `;
                 });
@@ -251,6 +404,15 @@
                     fetchPendingPrograms(); // Siyahını anlıq yenilə
                 }
             } catch (err) { alert("Təsdiqləmə uğursuz oldu"); }
+        }
+
+        async function rejectProgram(id) {
+            try {
+                const res = await fetch(`${API_BASE}/programs/${id}/reject`, { method: 'POST' });
+                if(res.ok) {
+                    fetchPendingPrograms(); // Siyahını anlıq yenilə
+                }
+            } catch (err) { alert("Rədd etmə uğursuz oldu"); }
         }
 
         window.onload = () => {
