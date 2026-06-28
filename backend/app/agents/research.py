@@ -2,6 +2,7 @@ import os
 import requests
 import json
 import re
+from .extraction import parse_json_block
 
 class ResearchAgent:
     def __init__(self):
@@ -9,13 +10,23 @@ class ResearchAgent:
         self.model = "openai/gpt-oss-120b:free"
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
+    def _raw_hrefs(self, raw_html: str) -> list:
+        """HTML-dən href dəyərlərini yığır: əvvəlcə BeautifulSoup, alınmasa regex."""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(raw_html, "html.parser")
+            return [a.get("href") for a in soup.find_all("a", href=True)]
+        except Exception:
+            return re.findall(r'href=["\'](https?://.*?|/.*?)["\']', raw_html)
+
     def extract_all_links(self, raw_html: str, base_url: str) -> list:
         """HTML daxilindən bütün daxili (internal) linkləri yığır"""
-        # Sadə regex ilə href-ləri tuturuq
-        links = re.findall(r'href=["\'](https?://.*?|/.*?)["\']', raw_html)
+        links = self._raw_hrefs(raw_html)
         cleaned_links = []
-        
+
         for link in links:
+            if not link:
+                continue
             # Sosial şəbəkə və lazımsız fayl linklərini filterləyirik
             if any(x in link for x in ["facebook", "instagram", "linkedin", "twitter", ".pdf", ".jpg", ".png"]):
                 continue
@@ -72,15 +83,11 @@ class ResearchAgent:
             response = requests.post(self.url, json=payload, headers=headers, timeout=20)
             if response.status_code == 200:
                 ai_res = response.json()['choices'][0]['message']['content'].strip()
-                
-                # Əgər model inadkarlıq edib markdown qaytararsa təmizləyirik
-                if ai_res.startswith("```"):
-                    ai_res = re.sub(r'```json|```', '', ai_res).strip()
-                
-                data = json.loads(ai_res)
-                target = data.get("target_url", base_url)
-                print(f"[Research Agent]: Ixtisas səhifəsi tapıldı -> {target}")
-                return target
+                data = parse_json_block(ai_res)
+                if isinstance(data, dict):
+                    target = data.get("target_url", base_url)
+                    print(f"[Research Agent]: Ixtisas səhifəsi tapıldı -> {target}")
+                    return target
         except Exception as e:
             print(f"[Research Agent Xətası]: {str(e)}")
             

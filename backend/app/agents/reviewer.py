@@ -8,10 +8,15 @@ class ReviewerAgent:
         self.model = "openai/gpt-oss-120b:free"
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
-    def review_pipeline(self, university_name: str, target_url: str, total_valid: int, change_report: dict) -> str:
+    def review_pipeline(self, university_name: str, target_url: str, total_valid: int,
+                        change_report: dict, avg_confidence: float = None, pending_count: int = 0) -> str:
         """Bütün agentlərin işini icmal edir və yekun idarəçi hesabatı hazırlayır"""
         if not self.api_key:
-            return "[TƏSDİQLƏNDİ] API açarı olmadığı üçün standart rejimdə yekunlaşdı."
+            return (
+                f"[TƏSDİQLƏNDİ] {university_name} üzrə analiz tamamlandı. "
+                f"{total_valid} ixtisas emal olundu, {len(change_report.get('new', []))} yeni, "
+                f"{pending_count} ədəd insan yoxlamasına göndərildi."
+            )
 
         # Agentlərin çıxardığı nəticələrin xülasəsi
         summary_metrics = {
@@ -19,8 +24,10 @@ class ReviewerAgent:
             "analyzed_url": target_url,
             "total_extracted_and_valid_count": total_valid,
             "new_majors_detected": len(change_report.get("new", [])),
-            "updated_fees_detected": len(change_report.get("updated", [])),
-            "stable_unchanged_majors": change_report.get("unchanged_count", 0)
+            "updated_fields_detected": len(change_report.get("updated", [])),
+            "stable_unchanged_majors": change_report.get("unchanged_count", 0),
+            "average_confidence": avg_confidence,
+            "sent_to_human_review": pending_count,
         }
 
         # Modelə tapşırıq veririk

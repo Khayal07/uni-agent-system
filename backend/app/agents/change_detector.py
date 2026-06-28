@@ -1,59 +1,90 @@
 from sqlalchemy.orm import Session
 from .. import models
 
+# Dəyişiklik üçün izlənən sahələr (incoming dict açarı == model atributu)
+TRACKED_FIELDS = [
+    "tuition_fee",
+    "language",
+    "application_deadline",
+    "gpa_requirement",
+    "documents_required",
+    "requirements",
+    "faculty",
+]
+
+
+def _norm(value) -> str:
+    return str(value).strip() if value is not None else ""
+
+
 class ChangeDetectorAgent:
     def __init__(self):
         pass
 
     def detect_changes(self, db: Session, university_id: int, incoming_programs: list) -> dict:
-        """Bazadakı mövcud ixtisaslarla yeni gələn ixtisasları unikal kombinasiya ilə müqayisə edir"""
-        
-        # 1. Həmin universitetə aid bazada artıq mövcud olan bütün ixtisasları çəkirik
-        existing_programs = db.query(models.Program).filter(models.Program.university_id == university_id).all()
-        
-        # 2. TƏHLÜKƏSİZ Sürətli axtarış lüğəti (None/NULL dəyərlərə qarşı qorunma ilə)
+        """Bazadakı mövcud ixtisaslarla yeni gələnləri (ad, dərəcə) açarı ilə müqayisə edir.
+
+        Dil variasiyasından doğan yanlış 'yeni' xəbərdarlığının qarşısını almaq üçün
+        unikal açar yalnız (program_name, degree)-dir; dil isə izlənən bir sahədir.
+        Dəyişən hər sahə üçün ChangeLog qeydi yaradılır (köhnə → yeni audit)."""
+
+        existing_programs = (
+            db.query(models.Program)
+            .filter(models.Program.university_id == university_id)
+            .all()
+        )
+
+        # None/NULL dəyərlərə qarşı qorunma ilə sürətli axtarış lüğəti
         existing_lookup = {}
         for p in existing_programs:
-            # Əgər bazada hər hansı bir sütun səhvən NULL-dırsa, çökməsin deyə (p.sahə or "") edirik
             name = (p.program_name or "").lower().strip()
             deg = (p.degree or "").lower().strip()
-            lang = (p.language or "").lower().strip()
-            existing_lookup[(name, deg, lang)] = p
-        
+            existing_lookup[(name, deg)] = p
+
         report = {
-            "new": [],        # Bazada heç olmayan tamamilə yeni ixtisaslar
-            "updated": [],    # Özü var, amma qiyməti dəyişən ixtisaslar
-            "unchanged_count": 0  # Hər şeyi eyni qalan ixtisasların sayı
+            "new": [],            # Bazada heç olmayan tamamilə yeni ixtisaslar
+            "updated": [],        # Mövcud, amma hər hansı sahəsi dəyişən ixtisaslar
+            "unchanged_count": 0, # Hər şeyi eyni qalan ixtisasların sayı
         }
-        
-        # 3. Müqayisə dövrəsi
+
         for incoming in incoming_programs:
-            raw_name = incoming.get("program_name", "")
-            raw_deg = incoming.get("degree", "")
-            raw_lang = incoming.get("language", "")
-            
-            # Gələn datanın da təhlükəsizlik formatlanması
-            name = str(raw_name).lower().strip() if raw_name else ""
-            deg = str(raw_deg).lower().strip() if raw_deg else ""
-            lang = str(raw_lang).lower().strip() if raw_lang else ""
-            
-            key = (name, deg, lang)
-            
+            name = _norm(incoming.get("program_name")).lower()
+            deg = _norm(incoming.get("degree")).lower()
+            key = (name, deg)
+
             if key not in existing_lookup:
-                # İxtisas bazada tapılmadı -> Deməli yenidir
                 report["new"].append(incoming)
+                continue
+
+            db_prog = existing_lookup[key]
+
+            # İzlənən sahələri tək-tək müqayisə edirik
+            changed_fields = []
+            for field in TRACKED_FIELDS:
+                old_val = _norm(getattr(db_prog, field, None))
+                new_val = _norm(incoming.get(field))
+                if new_val != old_val:
+                    changed_fields.append({"field": field, "old": old_val, "new": new_val})
+                    # Köhnə → yeni dəyişikliyi audit jurnalına yazırıq
+                    db.add(
+                        models.ChangeLog(
+                            program_id=db_prog.id,
+                            university_id=university_id,
+                            field_name=field,
+                            old_value=old_val,
+                            new_value=new_val,
+                        )
+                    )
+
+            if changed_fields:
+                incoming["id"] = db_prog.id
+                incoming["changed_fields"] = changed_fields
+                report["updated"].append(incoming)
             else:
-                # İxtisas bazada var, yoxlayaq görək qiyməti dəyişibmi?
-                db_prog = existing_lookup[key]
-                incoming_fee = str(incoming.get("tuition_fee", "0")).strip()
-                db_fee = str(db_prog.tuition_fee).strip() if db_prog.tuition_fee else "0"
-                
-                if incoming_fee != db_fee:
-                    # Qiymət dəyişibsə, mövcud DB sətirinin ID-sini ötürürük ki, SQL UPDATE edə bilsin
-                    incoming["id"] = db_prog.id
-                    report["updated"].append(incoming)
-                else:
-                    report["unchanged_count"] += 1
-                    
-        print(f"[Change Detector]: Analiz bitdi. Yeni: {len(report['new'])}, Yenilənən: {len(report['updated'])}, Dəyişməyən: {report['unchanged_count']}")
+                report["unchanged_count"] += 1
+
+        print(
+            f"[Change Detector]: Analiz bitdi. Yeni: {len(report['new'])}, "
+            f"Yenilənən: {len(report['updated'])}, Dəyişməyən: {report['unchanged_count']}"
+        )
         return report
