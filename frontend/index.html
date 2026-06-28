@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniAgent · Universitet Məlumat Reyestri</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<!-- seal glyph reused -->
+<svg width="0" height="0" style="position:absolute"><defs>
+<g id="sealGlyph">
+  <circle cx="24" cy="24" r="22" fill="none" stroke="#E0A458" stroke-width="1.4"/>
+  <circle cx="24" cy="24" r="17" fill="none" stroke="#E0A458" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>
+  <circle cx="24" cy="12" r="2.6" fill="#E0A458"/>
+  <circle cx="13.6" cy="30" r="2.6" fill="#E0A458"/>
+  <circle cx="34.4" cy="30" r="2.6" fill="#E0A458"/>
+  <path d="M24 12 L13.6 30 L34.4 30 Z" fill="none" stroke="#E0A458" stroke-width="1.2" opacity=".85"/>
+  <circle cx="24" cy="24" r="3.4" fill="#E0A458"/>
+</g></defs></svg>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="seal" viewBox="0 0 48 48"><use href="#sealGlyph"/></svg>
+    <div class="brand-text">
+      <h1>UniAgent</h1>
+      <p>Universitet Məlumat <b>Reyestri</b></p>
+    </div>
+  </div>
+  <div class="live"><span class="pulse"></span> Sistem aktiv</div>
+</header>
+
+<main class="layout">
+
+  <!-- ===== Left rail: sources ===== -->
+  <aside>
+    <div class="panel">
+      <div class="panel-head">
+        <div><span class="eyebrow"><b>01</b> · Mənbə</span><h2 class="panel-title">Universitet əlavə et</h2></div>
+      </div>
+      <div class="panel-pad">
+        <div class="field">
+          <label class="label" for="uniName">Universitetin adı</label>
+          <input id="uniName" class="input" type="text" placeholder="Məs: UNEC">
+        </div>
+        <div class="field">
+          <label class="label" for="uniUrl">Rəsmi sayt (URL)</label>
+          <input id="uniUrl" class="input" type="url" placeholder="https://unec.edu.az">
+        </div>
+        <button class="btn btn-primary" onclick="addUniversity()">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+          Reyestrə daxil et
+        </button>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="seedDatabase()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+            Demo data
+          </button>
+          <button class="btn btn-danger" onclick="resetDatabase()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+            Sıfırla
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><span class="eyebrow"><b>02</b> · Reyestr</span><h2 class="panel-title">Mənbə siyahısı</h2></div>
+      </div>
+      <div class="panel-pad">
+        <div id="uniList" class="sources"><p class="muted">Yüklənir…</p></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Workspace ===== -->
+  <section>
+    <!-- Empty state -->
+    <div id="emptyArea" class="empty">
+      <svg class="seal-lg" viewBox="0 0 48 48"><use href="#sealGlyph"/></svg>
+      <h2>Hələ heç bir qeyd yoxdur.</h2>
+      <p>Soldan bir mənbə seçib agentləri işə salın — yoxlanılmış proqram qeydləri burada toplanacaq.</p>
+      <div class="hint">Research → Extraction → Validation → Change → Review</div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsArea" class="results hidden">
+
+      <!-- Readouts -->
+      <div class="readouts">
+        <div class="readout"><div class="rlabel">Ümumi</div><div id="mProcessed" class="rval">—</div></div>
+        <div class="readout is-new"><div class="rlabel">Yeni</div><div id="mNew" class="rval">—</div></div>
+        <div class="readout is-upd"><div class="rlabel">Yenilənən</div><div id="mUpdated" class="rval">—</div></div>
+        <div class="readout"><div class="rlabel">Stabil</div><div id="mUnchanged" class="rval">—</div></div>
+        <div class="readout is-pend"><div class="rlabel">Gözləyən</div><div id="mPending" class="rval">—</div></div>
+        <div class="readout"><div class="rlabel">Orta etibar</div><div id="mConf" class="rval">—</div></div>
+      </div>
+
+      <!-- Intelligence brief -->
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-head">
+          <div><span class="eyebrow"><b>03</b> · Reviewer Agent</span><h2 class="panel-title">Əməliyyat icmalı</h2></div>
+          <div class="brief-meta"><span id="uniBadge" class="badge">—</span></div>
+        </div>
+        <div class="panel-pad">
+          <div id="reportText" class="brief-body">Agent icmalı burada görünəcək…</div>
+          <div class="srcline">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--dim)"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+            Mənbə: <a id="usedUrl" href="#" target="_blank">—</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Register -->
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-head">
+          <div><span class="eyebrow"><b>04</b> · Qeydlər</span><h2 class="panel-title">Çıxarılmış proqramlar</h2></div>
+        </div>
+        <div class="register-wrap">
+          <table class="register">
+            <thead><tr>
+              <th>İxtisas</th><th>Səviyyə</th><th>Dil</th><th>Təhsil haqqı</th><th>Son tarix</th><th>Etibarlılıq</th><th>Status</th>
+            </tr></thead>
+            <tbody id="programsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Change ledger -->
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-head">
+          <div><span class="eyebrow"><b>05</b> · Audit</span><h2 class="panel-title">Dəyişiklik jurnalı · köhnə → yeni</h2></div>
+        </div>
+        <div class="panel-pad">
+          <div id="changesContainer" class="ledger">
+            <p class="muted">Hələ dəyişiklik yoxdur. Eyni mənbəni təkrar işə salanda fərqlər burada görünəcək.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verification queue -->
+      <div class="panel" style="margin-top:18px">
+        <div class="panel-head">
+          <div><span class="eyebrow" style="color:var(--review)"><b>06</b> · İnsan yoxlaması</span><h2 class="panel-title">Təsdiq növbəsi</h2></div>
+        </div>
+        <div class="panel-pad">
+          <div id="pendingContainer" class="queue">
+            <p class="muted">Təsdiq gözləyən şübhəli qeyd yoxdur.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</main>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="overlay hidden">
+  <div class="overlay-card">
+    <span class="eyebrow"><b>Pipeline</b> · iş gedir</span>
+    <h3>Agentlər mənbəni araşdırır</h3>
+    <ol class="pipeline" id="pipelineStages">
+      <li class="stage"><span class="node">01</span><span class="sname">Research — sayt araşdırması</span></li>
+      <li class="stage"><span class="node">02</span><span class="sname">Extraction — məlumat çıxarma</span></li>
+      <li class="stage"><span class="node">03</span><span class="sname">Validation — yoxlama və bal</span></li>
+      <li class="stage"><span class="node">04</span><span class="sname">Change — dəyişiklik analizi</span></li>
+      <li class="stage"><span class="node">05</span><span class="sname">Review — yekun icmal</span></li>
+    </ol>
+    <p class="overlay-note">Süni intellekt strukturu analiz edir — 10–15 saniyə.</p>
+    <div class="bar"><i></i></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

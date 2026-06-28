@@ -18,7 +18,14 @@ from .agents.change_detector import ChangeDetectorAgent
 from .agents.reviewer import ReviewerAgent
 
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import os
+
+# Frontend qovluğu: layihə kökündəki "frontend/" (backend/app-dan iki səviyyə yuxarı).
+# Docker-də /frontend, lokal işlədikdə isə ../../frontend istifadə olunur.
+_DOCKER_FRONTEND = "/frontend"
+_LOCAL_FRONTEND = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend"))
+FRONTEND_DIR = _DOCKER_FRONTEND if os.path.isdir(_DOCKER_FRONTEND) else _LOCAL_FRONTEND
 
 # Agentlərin instansiyalarını yaradırıq
 research_agent = ResearchAgent()
@@ -28,6 +35,9 @@ change_detector_agent = ChangeDetectorAgent()
 reviewer_agent = ReviewerAgent()
 
 app = FastAPI(title="UniAgent: Multi-Agent University Data Pipeline")
+
+# Statik frontend faylları (styles.css, app.js) /static altında verilir
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 # Tətbiq qalxan kimi DB cədvəllərini yaradırıq (təmiz mühitdə də işləsin deyə)
 models.Base.metadata.create_all(bind=engine)
@@ -118,7 +128,7 @@ def get_universities(db: Session = Depends(get_db)):
 
 @app.get("/", response_class=HTMLResponse, tags=["Frontend"])
 def serve_frontend():
-    frontend_path = os.path.join(os.path.dirname(__file__), "index.html")
+    frontend_path = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(frontend_path):
         with open(frontend_path, "r", encoding="utf-8") as f:
             return f.read()

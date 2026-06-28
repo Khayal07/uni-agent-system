@@ -23,6 +23,28 @@ Universitet URL → Research → Extraction → Validation → Change Detection 
 Çıxarılan sahələr: proqram adı, fakültə, dərəcə, dil, təhsil haqqı, **müraciət tarixi,
 GPA tələbi, tələb olunan sənədlər**.
 
+## Qovluq strukturu
+
+```
+uni-agent-system/
+├── backend/              # FastAPI + agentlər
+│   ├── app/
+│   │   ├── agents/       # 5 agent
+│   │   ├── seed/         # fixture data
+│   │   └── main.py · models.py · crud.py · schemas.py · database.py · config.py
+│   ├── tests/
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/             # statik UI
+│   ├── index.html        # markup
+│   ├── styles.css        # üslublar
+│   └── app.js            # məntiq
+├── docker-compose.yml
+└── README.md
+```
+
+Frontend FastAPI tərəfindən verilir: `/` → `index.html`, `/static/*` → `styles.css`, `app.js`.
+
 ## Quraşdırma
 
 `.env` faylı (nümunə):

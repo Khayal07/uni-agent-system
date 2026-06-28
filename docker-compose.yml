@@ -2,11 +2,14 @@ version: '3.8'
 
 services:
   uni_agent_api:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/code
+      - ./frontend:/frontend
     env_file:
       - .env
     environment:
