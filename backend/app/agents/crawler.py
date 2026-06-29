@@ -62,8 +62,8 @@ def _urllib_fetch(url: str, timeout: int = 20) -> str:
         return ""
 
 
-def fetch(url: str, timeout: int = 20) -> str:
-    """Əvvəl Playwright (JS-render), alınmasa urllib. Heç biri olmasa boş string."""
+def _playwright_fetch(url: str, timeout: int = 20) -> str:
+    """Playwright ilə JS-render olunmuş HTML; alınmasa boş string."""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -71,14 +71,28 @@ def fetch(url: str, timeout: int = 20) -> str:
             page = browser.new_page(user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120 Safari/537.36"))
-            page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
+            page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+            # JS-render üçün qısa əlavə gözləmə (networkidle bəzi saytlarda heç sakitləşmir)
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
             html = page.content()
             browser.close()
-            if html and len(html) > 200:
-                return html
+            return html or ""
     except Exception as e:
         print(f"[Crawler Playwright xətası] {url}: {e} — urllib-ə keçilir")
-    return _urllib_fetch(url, timeout)
+        return ""
+
+
+def fetch(url: str, timeout: int = 20) -> str:
+    """HTML çəkir: Playwright (JS-render) və urllib (statik server-render) — uzununu seçir.
+
+    JS saytlarda urllib boş shell verir, Playwright qazanır; UCL kimi statik saytlarda
+    isə Playwright erkən shell tutur, urllib tam siyahını verir. İkisindən uzunu götürülür."""
+    pw = _playwright_fetch(url, timeout)
+    ul = _urllib_fetch(url, timeout)
+    return pw if len(pw) >= len(ul) else ul
 
 
 def discover_sitemap_urls(base_url: str) -> list:
