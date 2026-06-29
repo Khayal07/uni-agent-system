@@ -180,3 +180,42 @@ def test_program_name_precision_recall():
     precision, recall = _precision_recall(gold, predicted)
     assert round(precision, 2) == 0.67   # 2/3 düzgün proqnoz
     assert round(recall, 2) == 0.67      # 3-dən 2-si tapıldı
+
+
+# ----------------------------------------------------------------------
+# Crawler — heuristik link ranking + sitemap parse (LLM YOX)
+# ----------------------------------------------------------------------
+from app.agents.crawler import rank_candidate_urls, _parse_sitemap_xml
+
+
+def test_rank_prioritizes_program_keywords():
+    hrefs = [
+        "https://uni.edu/contact",
+        "https://uni.edu/undergraduate/programs",
+        "https://uni.edu/news",
+    ]
+    ranked = rank_candidate_urls(hrefs, [], "https://uni.edu")
+    assert ranked[0] == "https://uni.edu/undergraduate/programs"
+
+
+def test_rank_filters_external_and_files():
+    hrefs = [
+        "https://other.com/programs",      # xarici domen
+        "https://uni.edu/file.pdf",        # fayl
+        "https://uni.edu/bachelor",        # keçərli
+    ]
+    ranked = rank_candidate_urls(hrefs, [], "https://uni.edu")
+    assert ranked == ["https://uni.edu/bachelor"]
+
+
+def test_rank_merges_sitemap_and_caps_top5():
+    hrefs = [f"https://uni.edu/p{i}/admission" for i in range(10)]
+    ranked = rank_candidate_urls(hrefs, ["https://uni.edu/study/programs"], "https://uni.edu")
+    assert len(ranked) <= 5
+    assert "https://uni.edu/study/programs" in ranked
+
+
+def test_parse_sitemap_extracts_locs():
+    xml = """<urlset><url><loc>https://uni.edu/a</loc></url>
+             <url><loc>https://uni.edu/b</loc></url></urlset>"""
+    assert _parse_sitemap_xml(xml) == ["https://uni.edu/a", "https://uni.edu/b"]
