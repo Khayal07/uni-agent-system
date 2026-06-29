@@ -53,17 +53,43 @@ class ExtractionAgent:
             text = re.sub(r'<[^>]+>', ' ', text)
             return re.sub(r'\s+', ' ', text).strip()
 
+    def _chunk_text(self, text: str, size: int = 12000, overlap: int = 500) -> list:
+        """Uzun mətni üst-üstə düşən hissələrə bölür (15000 kəsimini əvəz edir)."""
+        if len(text) <= size:
+            return [text]
+        chunks, start = [], 0
+        while start < len(text):
+            chunks.append(text[start:start + size])
+            start += size - overlap
+        return chunks
+
+    def _dedupe(self, programs: list) -> list:
+        """program_name (normallaşdırılmış) üzrə dublikatları silir."""
+        seen, out = set(), []
+        for p in programs:
+            key = (p.get("program_name") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(p)
+        return out
+
     def extract_programs(self, raw_html: str) -> list:
-        """Təmizlənmiş mətndən universitet ixtisaslarını JSON formatında çıxarır"""
+        """Təmizlənmiş mətndən universitet ixtisaslarını çıxarır (chunk + dedupe)"""
         if not self.api_key:
             print("[Extraction Agent Xətası]: API açarı tapılmadı!")
             return []
 
-        # HTML təmizləmə filtrini işə salırıq
         cleaned_text = self.clean_html(raw_html)
-        
-        # Modelin kontekstini qorumaq üçün mətni optimallaşdırırıq
-        prompt_text = cleaned_text[:15000]
+        all_programs = []
+        for chunk in self._chunk_text(cleaned_text):
+            all_programs.extend(self._extract_chunk(chunk))
+        result = self._dedupe(all_programs)
+        print(f"[Extraction Agent]: dedupe sonrası {len(result)} ixtisas.")
+        return result
+
+    def _extract_chunk(self, prompt_text: str) -> list:
+        """Bir mətn hissəsindən LLM ilə ixtisasları çıxarır."""
 
         prompt = f"""
         You are the 'Extraction Agent'. Analyze the following text extracted from a university website and extract all available academic programs/majors.

@@ -219,3 +219,30 @@ def test_parse_sitemap_extracts_locs():
     xml = """<urlset><url><loc>https://uni.edu/a</loc></url>
              <url><loc>https://uni.edu/b</loc></url></urlset>"""
     assert _parse_sitemap_xml(xml) == ["https://uni.edu/a", "https://uni.edu/b"]
+
+
+# ----------------------------------------------------------------------
+# Extraction — chunk + dedupe (15000 kəsimi əvəzinə)
+# ----------------------------------------------------------------------
+from app.agents.extraction import ExtractionAgent
+
+
+def test_chunk_text_covers_long_text_with_overlap():
+    agent = ExtractionAgent()
+    text = "x" * 25000
+    chunks = agent._chunk_text(text, size=12000, overlap=500)
+    assert len(chunks) >= 3
+    assert all(len(c) <= 12000 for c in chunks)
+    # Birinci chunk-ın sonu ikincinin əvvəlində görünür (overlap)
+    assert chunks[0][-100:] in chunks[1]
+
+
+def test_dedupe_removes_same_program_name():
+    agent = ExtractionAgent()
+    progs = [
+        {"program_name": "Maliyyə", "tuition_fee": "2600"},
+        {"program_name": " maliyyə ", "tuition_fee": "2600"},  # eyni ad, fərqli yazılış
+        {"program_name": "Kompüter mühəndisliyi", "tuition_fee": "5400"},
+    ]
+    out = agent._dedupe(progs)
+    assert len(out) == 2
