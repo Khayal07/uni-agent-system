@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniAgent · Tam Baza Görünüşü</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='22' fill='none' stroke='%23E0A458' stroke-width='2'/%3E%3Cpath d='M24 12 L13.6 30 L34.4 30 Z' fill='none' stroke='%23E0A458' stroke-width='2'/%3E%3Ccircle cx='24' cy='24' r='3.4' fill='%23E0A458'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="seal" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="none" stroke="#E0A458" stroke-width="1.4"/><path d="M24 12 L13.6 30 L34.4 30 Z" fill="none" stroke="#E0A458" stroke-width="1.2" opacity=".85"/><circle cx="24" cy="24" r="3.4" fill="#E0A458"/></svg>
+    <div class="brand-text">
+      <h1>UniAgent</h1>
+      <p>Tam <b>Baza</b> Görünüşü</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <a class="btn btn-ghost btn-sm" href="/">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Dashboard
+    </a>
+  </div>
+</header>
+
+<main class="db-layout">
+
+  <!-- Sayğaclar -->
+  <div class="readouts" id="dbCounts" style="grid-template-columns:repeat(3,1fr)">
+    <div class="readout"><div class="rlabel">Universitet</div><div id="cUni" class="rval">—</div></div>
+    <div class="readout is-new"><div class="rlabel">Proqram</div><div id="cProg" class="rval">—</div></div>
+    <div class="readout is-upd"><div class="rlabel">Dəyişiklik jurnalı</div><div id="cChg" class="rval">—</div></div>
+  </div>
+
+  <!-- Universitetlər -->
+  <div class="panel" style="margin-top:18px">
+    <div class="panel-head"><div><span class="eyebrow"><b>01</b> · Cədvəl</span><h2 class="panel-title">universities</h2></div></div>
+    <div class="register-wrap">
+      <table class="register">
+        <thead><tr><th>ID</th><th>Ad</th><th>Sayt</th><th>Yaradılıb</th></tr></thead>
+        <tbody id="tbUni"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Proqramlar -->
+  <div class="panel" style="margin-top:18px">
+    <div class="panel-head"><div><span class="eyebrow"><b>02</b> · Cədvəl</span><h2 class="panel-title">programs</h2></div></div>
+    <div class="register-wrap">
+      <table class="register">
+        <thead><tr>
+          <th>ID</th><th>Uni</th><th>Fakültə</th><th>İxtisas</th><th>Səviyyə</th><th>Dil</th>
+          <th>Haqq</th><th>Son tarix</th><th>GPA</th><th>Etibar</th><th>Status</th>
+        </tr></thead>
+        <tbody id="tbProg"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Dəyişiklik jurnalı -->
+  <div class="panel" style="margin-top:18px">
+    <div class="panel-head"><div><span class="eyebrow"><b>03</b> · Cədvəl</span><h2 class="panel-title">change_logs</h2></div></div>
+    <div class="register-wrap">
+      <table class="register">
+        <thead><tr>
+          <th>ID</th><th>Proqram</th><th>Uni</th><th>Sahə</th><th>Köhnə</th><th>Yeni</th><th>Tarix</th>
+        </tr></thead>
+        <tbody id="tbChg"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const esc = s => (s==null?'—':String(s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function loadDatabase(){
+  let d;
+  try{ d = await (await fetch('/api/database')).json(); }
+  catch(e){ document.getElementById('tbUni').innerHTML='<tr><td colspan="4" class="muted">Baza yüklənmədi.</td></tr>'; return; }
+
+  document.getElementById('cUni').innerText = d.counts.universities;
+  document.getElementById('cProg').innerText = d.counts.programs;
+  document.getElementById('cChg').innerText = d.counts.change_logs;
+
+  document.getElementById('tbUni').innerHTML = d.universities.length
+    ? d.universities.map(u=>`<tr><td>${u.id}</td><td class="pname">${esc(u.name)}</td>
+        <td class="cell-mono">${esc(u.website_url)}</td><td class="sub">${esc(u.created_at)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="muted">Boş.</td></tr>';
+
+  document.getElementById('tbProg').innerHTML = d.programs.length
+    ? d.programs.map(p=>`<tr><td>${p.id}</td><td>${esc(p.university_id)}</td><td>${esc(p.faculty)}</td>
+        <td class="pname">${esc(p.program_name)}</td><td>${esc(p.degree)}</td><td>${esc(p.language)}</td>
+        <td class="cell-mono">${esc(p.tuition_fee)}</td><td>${esc(p.application_deadline)}</td>
+        <td>${esc(p.gpa_requirement)}</td><td class="cell-mono">${p.confidence_score!=null?Number(p.confidence_score).toFixed(2):'—'}</td>
+        <td>${esc(p.status)}</td></tr>`).join('')
+    : '<tr><td colspan="11" class="muted">Boş.</td></tr>';
+
+  document.getElementById('tbChg').innerHTML = d.change_logs.length
+    ? d.change_logs.map(c=>`<tr><td>${c.id}</td><td class="pname">${esc(c.program_name)}</td><td>${esc(c.university_id)}</td>
+        <td class="field-tag">${esc(c.field_name)}</td><td class="cell-mono" style="color:var(--rejected)">${esc(c.old_value)}</td>
+        <td class="cell-mono" style="color:var(--verified)">${esc(c.new_value)}</td><td class="sub">${esc(c.detected_at)}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="muted">Boş.</td></tr>';
+}
+loadDatabase();
+</script>
+</body>
+</html>

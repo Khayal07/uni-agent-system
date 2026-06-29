@@ -136,6 +136,56 @@ def serve_frontend():
     return "<h2>UniAgent UI tapılmadı! index.html faylını yoxlayın.</h2>"
 
 
+@app.get("/database", response_class=HTMLResponse, tags=["Frontend"])
+def serve_database_page():
+    """Tam baza görünüşü səhifəsi (bütün cədvəllər)."""
+    page_path = os.path.join(FRONTEND_DIR, "database.html")
+    if os.path.exists(page_path):
+        with open(page_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h2>database.html tapılmadı!</h2>"
+
+
+@app.get("/api/database", response_model=dict, tags=["Database"])
+def dump_database(db: Session = Depends(get_db)):
+    """Bütün cədvəlləri (scraped_pages istisna) JSON kimi qaytarır — tam baza görünüşü üçün."""
+    universities = db.query(models.University).all()
+    programs = db.query(models.Program).all()
+    changes = db.query(models.ChangeLog).order_by(models.ChangeLog.detected_at.desc()).all()
+
+    # program_id → program_name xəritəsi (jurnalda oxunaqlı ad üçün)
+    prog_name = {p.id: p.program_name for p in programs}
+
+    return {
+        "universities": [
+            {"id": u.id, "name": u.name, "website_url": u.website_url,
+             "created_at": str(u.created_at) if u.created_at else None}
+            for u in universities
+        ],
+        "programs": [
+            {"id": p.id, "university_id": p.university_id, "faculty": p.faculty,
+             "program_name": p.program_name, "degree": p.degree, "language": p.language,
+             "tuition_fee": p.tuition_fee, "application_deadline": p.application_deadline,
+             "gpa_requirement": p.gpa_requirement, "documents_required": p.documents_required,
+             "requirements": p.requirements, "confidence_score": p.confidence_score,
+             "status": p.status, "extracted_at": str(p.extracted_at) if p.extracted_at else None}
+            for p in programs
+        ],
+        "change_logs": [
+            {"id": c.id, "program_id": c.program_id, "program_name": prog_name.get(c.program_id),
+             "university_id": c.university_id, "field_name": c.field_name,
+             "old_value": c.old_value, "new_value": c.new_value,
+             "detected_at": str(c.detected_at) if c.detected_at else None}
+            for c in changes
+        ],
+        "counts": {
+            "universities": len(universities),
+            "programs": len(programs),
+            "change_logs": len(changes),
+        },
+    }
+
+
 # =====================================================================
 # UNİVERSİTET YARATMA ENDPOINT-İ
 # =====================================================================
