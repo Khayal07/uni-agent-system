@@ -44,3 +44,45 @@ def rank_candidate_urls(hrefs: list, sitemap_urls: list, base_url: str) -> list:
     scored = [t for t in scored if t[1] > 0]
     scored.sort(key=lambda t: t[1], reverse=True)
     return [u for u, _ in scored[:5]]
+
+
+def _urllib_fetch(url: str, timeout: int = 20) -> str:
+    """urllib fallback — User-Agent başlığı ilə xam HTML çəkir."""
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"},
+        )
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as r:
+            return r.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"[Crawler urllib xətası] {url}: {e}")
+        return ""
+
+
+def fetch(url: str, timeout: int = 20) -> str:
+    """Əvvəl Playwright (JS-render), alınmasa urllib. Heç biri olmasa boş string."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120 Safari/537.36"))
+            page.goto(url, timeout=timeout * 1000, wait_until="networkidle")
+            html = page.content()
+            browser.close()
+            if html and len(html) > 200:
+                return html
+    except Exception as e:
+        print(f"[Crawler Playwright xətası] {url}: {e} — urllib-ə keçilir")
+    return _urllib_fetch(url, timeout)
+
+
+def discover_sitemap_urls(base_url: str) -> list:
+    """base_url/sitemap.xml oxuyub <loc> URL-lərini qaytarır (yoxdursa boş)."""
+    sitemap_url = base_url.rstrip("/") + "/sitemap.xml"
+    xml = _urllib_fetch(sitemap_url, timeout=10)
+    return _parse_sitemap_xml(xml) if xml else []
