@@ -13,6 +13,7 @@ from .seed.seed_data import SEED_UNIVERSITIES, UPDATES
 # 5 Canavar Agentin importu
 from .agents.research import ResearchAgent
 from .agents.extraction import ExtractionAgent
+from .agents import crawler
 from .agents.validation import ValidationAgent
 from .agents.change_detector import ChangeDetectorAgent
 from .agents.reviewer import ReviewerAgent
@@ -171,24 +172,29 @@ def run_university_agent_pipeline(university_id: int, db: Session = Depends(get_
     base_url = db_university.website_url
     print(f"\n[START PIPELINE] -> {db_university.name} prosesi başladı...")
 
-    # STAGE 1 & 2: Scraping & Research Agent
-    home_html = helper_scrape(base_url)
-    target_url = research_agent.discover_specialty_url(home_html, base_url)
-    
-    # STAGE 3: Hədəf Səhifənin Skrapı
-    target_html = helper_scrape(target_url) if target_url != base_url else home_html
+    # STAGE 1-2: Skrap (Playwright) + heuristik link seçimi (LLM YOX)
+    home_html = crawler.fetch(base_url)
+    sitemap = crawler.discover_sitemap_urls(base_url)
+    hrefs = research_agent.extract_all_links(home_html, base_url)
+    candidates = crawler.rank_candidate_urls(hrefs, sitemap, base_url)
 
-    # Xam HTML-i audit üçün bazaya yadda saxlayırıq
-    db_page = models.ScrapedPage(university_id=university_id, url=target_url, raw_html=target_html)
-    db.add(db_page)
+    # STAGE 3: Namizəd səhifələri çək, mətnləri birləşdir (ən çox 5)
+    pages_html = [home_html]
+    for url in candidates[:5]:
+        html = crawler.fetch(url)
+        if html:
+            pages_html.append(html)
+            db.add(models.ScrapedPage(university_id=university_id, url=url, raw_html=html))
+    target_url = candidates[0] if candidates else base_url
+    combined_html = "\n".join(pages_html)
 
-    # STAGE 4: Extraction Agent
-    raw_programs = extraction_agent.extract_programs(target_html)
+    # STAGE 4: Extraction Agent (chunk + dedupe)
+    raw_programs = extraction_agent.extract_programs(combined_html)
     if not raw_programs:
         return {"status": "warning", "message": "İxtisas tapılmadı.", "reviewer_report": "[RƏDD EDİLDİ] Data boşdur."}
 
     # STAGE 5: Validation Agent — səhifə mətni ilə müqayisə + qayda-əsaslı confidence
-    source_text = extraction_agent.clean_html(target_html)
+    source_text = extraction_agent.clean_html(combined_html)
     valid_programs = validation_agent.validate_data(raw_programs, source_text)
 
     # STAGE 6 & 7: Change Detector + Bazaya İnteqrasiya
