@@ -98,7 +98,7 @@ class ExtractionAgent:
         {prompt_text}
 
         Extract the following fields for each program:
-        - faculty (e.g., "Rəqəmsal İqtisadiyyat", "Bakalavriat", or faculty name if specified)
+        - faculty (the faculty/department name ONLY if it explicitly appears in the text, e.g., "Faculty of Arts and Humanities". If no faculty/department is stated, use null. NEVER copy the examples in this prompt.)
         - program_name (e.g., "Kompüter mühəndisliyi", "Maliyyə")
         - degree (Must be exactly "Bachelor" or "Master")
         - language (e.g., "Azerbaijani", "English", "Russian", or combined like "Azerbaijani, Eng")
@@ -111,9 +111,9 @@ class ExtractionAgent:
         Rules:
         1. Return a strict JSON array of objects. Example format:
            [
-             {{"faculty": "Bakalavriat", "program_name": "Maliyyə", "degree": "Bachelor", "language": "Azerbaijani", "tuition_fee": "2600", "application_deadline": "31 Avqust 2026", "gpa_requirement": null, "documents_required": "Attestat, şəxsiyyət vəsiqəsi", "requirements": null}}
+             {{"faculty": null, "program_name": "Maliyyə", "degree": "Bachelor", "language": "Azerbaijani", "tuition_fee": "2600", "application_deadline": "31 Avqust 2026", "gpa_requirement": null, "documents_required": "Attestat, şəxsiyyət vəsiqəsi", "requirements": null}}
            ]
-        2. Only extract values that actually appear in the text. If a field is unknown, use null. Do not invent data.
+        2. Only extract values that ACTUALLY appear in the text. If a field is unknown or not stated, use null. NEVER invent data and NEVER reuse the example values from this prompt — they are format samples only.
         3. Do not include markdown wraps like ```json ... ``` or any explanatory text. Return the raw JSON string array only.
         4. If no programs are found, return an empty array [].
         """
