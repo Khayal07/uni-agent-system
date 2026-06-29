@@ -142,7 +142,7 @@ a{color:inherit}
 .srcline a:hover{color:var(--gold-bright)}
 
 /* ---------- Register (programs table) ---------- */
-.register-wrap{max-height:360px;overflow:auto}
+.register-wrap{overflow-x:auto}
 table.register{width:100%;border-collapse:collapse;font-size:13px}
 .register thead th{
   position:sticky;top:0;background:var(--surface-2);text-align:left;font-family:"JetBrains Mono",monospace;
@@ -174,7 +174,7 @@ table.register{width:100%;border-collapse:collapse;font-size:13px}
 .stamp.is-rejected{color:var(--rejected);border-color:rgba(224,107,107,.4);background:rgba(224,107,107,.08)}
 
 /* ---------- Change ledger ---------- */
-.ledger{display:flex;flex-direction:column;gap:9px;max-height:280px;overflow-y:auto;padding-right:3px}
+.ledger{display:flex;flex-direction:column;gap:9px}
 .change{background:var(--ink-2);border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:12px 14px}
 .change-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;gap:10px}
 .change-prog{font-weight:600;font-size:13px;color:var(--bone)}
@@ -185,7 +185,7 @@ table.register{width:100%;border-collapse:collapse;font-size:13px}
 .diff .new{color:var(--verified)}
 
 /* ---------- Verification queue ---------- */
-.queue{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto;padding-right:3px}
+.queue{display:flex;flex-direction:column;gap:10px}
 .qitem{display:flex;justify-content:space-between;align-items:center;gap:14px;background:var(--ink-2);border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:13px 15px}
 .qitem.flag{border-left:2px solid var(--review)}
 .qinfo{min-width:0}
