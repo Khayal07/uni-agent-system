@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 import urllib.request
 import ssl
+import json
+import time as _time
 
 # Verilənlər bazası strukturlarımız
-from .database import engine, get_db
+from .database import engine, get_db, SessionLocal
 from . import models, schemas, crud
 from .config import CONFIDENCE_THRESHOLD, DATABASE_URL
 from .seed.seed_data import SEED_UNIVERSITIES, UPDATES
@@ -18,7 +20,7 @@ from .agents.validation import ValidationAgent
 from .agents.change_detector import ChangeDetectorAgent
 from .agents.reviewer import ReviewerAgent
 
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -221,64 +223,71 @@ def create_university(
 # =====================================================================
 # MULTI-AGENT PIPELINE ENDPOINT-İ
 # =====================================================================
-@app.post("/universities/{university_id}/run-agent-pipeline", response_model=dict, tags=["Agent Pipeline"])
-def run_university_agent_pipeline(university_id: int, db: Session = Depends(get_db)):
-    db_university = db.query(models.University).filter(models.University.id == university_id).first()
-    if not db_university:
-        raise HTTPException(status_code=404, detail="Universitet bazada tapılmadı!")
+def _run_pipeline_task(university_id: int, run_id: int):
+    """Pipeline-ı arxa planda (background task) icra edir və hər agent addımını
+    `AgentStep` kimi yazır — real-time monitoring bu qeydləri SSE ilə oxuyur.
 
-    base_url = db_university.website_url
-    print(f"\n[START PIPELINE] -> {db_university.name} prosesi başladı...")
-
-    # Audit: bu icra üçün AgentRun qeydi yaradılır (uğur/xəta + metriklər burada saxlanır)
-    run = crud.start_run(db, university_id, run_type="live")
-
+    Öz DB sessiyasını açır (background task ayrı sapda işləyir)."""
+    db = SessionLocal()
+    current_step = None
     try:
-        # STAGE 1-2: Skrap (Playwright) + heuristik link seçimi (LLM YOX)
+        db_university = db.query(models.University).filter(models.University.id == university_id).first()
+        base_url = db_university.website_url
+        print(f"\n[START PIPELINE] -> {db_university.name} (run {run_id}) prosesi başladı...")
+
+        # STEP 1: Research — skrap + heuristik link seçimi
+        current_step = crud.start_step(db, run_id, "research", input_summary=base_url)
         home_html = crawler.fetch(base_url)
         sitemap = crawler.discover_sitemap_urls(base_url)
         hrefs = research_agent.extract_all_links(home_html, base_url)
         candidates = crawler.rank_candidate_urls(hrefs, sitemap, base_url)
-
-        # STAGE 3: Namizəd səhifələri çək, mətnləri birləşdir (ən çox 5)
         pages_html = [home_html]
         for url in candidates[:5]:
             html = crawler.fetch(url)
             if html:
                 pages_html.append(html)
                 db.add(models.ScrapedPage(university_id=university_id, url=url, raw_html=html))
+        db.commit()
         target_url = candidates[0] if candidates else base_url
         combined_html = "\n".join(pages_html)
+        crud.finish_step(db, current_step, output_summary=f"{len(candidates)} namizəd səhifə · hədəf: {target_url}")
 
-        # STAGE 4: Extraction Agent (chunk + dedupe)
+        # STEP 2: Extraction
+        current_step = crud.start_step(db, run_id, "extraction", input_summary=f"HTML {len(combined_html)} simvol")
         raw_programs = extraction_agent.extract_programs(combined_html)
+        crud.finish_step(db, current_step, output_summary=f"{len(raw_programs)} xam ixtisas çıxarıldı")
         if not raw_programs:
-            crud.finish_run(db, run, "success", metrics={"total_processed": 0, "note": "no_programs"})
-            return {"status": "warning", "message": "İxtisas tapılmadı.",
-                    "run_id": run.id, "reviewer_report": "[RƏDD EDİLDİ] Data boşdur."}
+            run = db.query(models.AgentRun).filter(models.AgentRun.id == run_id).first()
+            crud.finish_run(db, run, "success",
+                            metrics={"total_processed": 0, "note": "no_programs", "source_url_used": target_url})
+            return
 
-        # STAGE 5: Validation Agent — səhifə mətni ilə müqayisə + qayda-əsaslı confidence
+        # STEP 3: Validation
+        current_step = crud.start_step(db, run_id, "validation", input_summary=f"{len(raw_programs)} ixtisas")
         source_text = extraction_agent.clean_html(combined_html)
         valid_programs = validation_agent.validate_data(raw_programs, source_text)
-
-        # STAGE 6 & 7: Change Detector + Bazaya İnteqrasiya (versiyalama daxil)
-        change_report, pending_count = integrate_programs(db, university_id, valid_programs, target_url)
-
-        # Orta etibarlılıq balı (metrik)
         avg_confidence = (
             round(sum(p.get("confidence_score", 0) for p in valid_programs) / len(valid_programs), 3)
             if valid_programs else 0
         )
+        crud.finish_step(db, current_step, output_summary=f"{len(valid_programs)} keçdi · orta etibar {avg_confidence}")
 
-        # STAGE 8: Reviewer Agent (Yekun Hesabat)
-        final_report = reviewer_agent.review_pipeline(
-            university_name=db_university.name,
-            target_url=target_url,
-            total_valid=len(valid_programs),
-            change_report=change_report,
-            avg_confidence=avg_confidence,
-            pending_count=pending_count
+        # STEP 4: Change Detection + inteqrasiya (versiyalama daxil)
+        current_step = crud.start_step(db, run_id, "change", input_summary=f"{len(valid_programs)} ixtisas")
+        change_report, pending_count = integrate_programs(db, university_id, valid_programs, target_url)
+        crud.finish_step(
+            db, current_step,
+            output_summary=f"yeni {len(change_report['new'])} · yenilənən {len(change_report['updated'])} · gözləyən {pending_count}",
         )
+
+        # STEP 5: Review
+        current_step = crud.start_step(db, run_id, "review")
+        final_report = reviewer_agent.review_pipeline(
+            university_name=db_university.name, target_url=target_url,
+            total_valid=len(valid_programs), change_report=change_report,
+            avg_confidence=avg_confidence, pending_count=pending_count,
+        )
+        crud.finish_step(db, current_step, output_summary="Yekun hesabat imzalandı", log_text=final_report)
 
         metrics = {
             "total_processed": len(valid_programs),
@@ -286,22 +295,96 @@ def run_university_agent_pipeline(university_id: int, db: Session = Depends(get_
             "updated_fees": len(change_report["updated"]),
             "unchanged": change_report["unchanged_count"],
             "pending_count": pending_count,
-            "avg_confidence": avg_confidence
-        }
-        crud.finish_run(db, run, "success", metrics=metrics)
-
-        return {
-            "status": "success",
-            "run_id": run.id,
+            "avg_confidence": avg_confidence,
             "university_name": db_university.name,
             "source_url_used": target_url,
-            "metrics": metrics,
-            "reviewer_report": final_report
+            "reviewer_report": final_report,
         }
+        run = db.query(models.AgentRun).filter(models.AgentRun.id == run_id).first()
+        crud.finish_run(db, run, "success", metrics=metrics)
+        print(f"[PIPELINE run {run_id}] uğurla bitdi.")
     except Exception as e:
         db.rollback()
-        crud.finish_run(db, run, "failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Pipeline xətası: {str(e)}")
+        if current_step is not None:
+            try:
+                crud.finish_step(db, current_step, status="failed", log_text=str(e))
+            except Exception:
+                db.rollback()
+        run = db.query(models.AgentRun).filter(models.AgentRun.id == run_id).first()
+        if run:
+            crud.finish_run(db, run, "failed", error=str(e))
+        print(f"[PIPELINE run {run_id}] XƏTA: {e}")
+    finally:
+        db.close()
+
+
+@app.post("/universities/{university_id}/run-agent-pipeline", response_model=dict, tags=["Agent Pipeline"])
+def run_university_agent_pipeline(university_id: int, background_tasks: BackgroundTasks,
+                                  db: Session = Depends(get_db)):
+    """Pipeline-ı arxa planda başladır və dərhal `run_id` qaytarır.
+
+    Frontend `run_id` ilə `/runs/{run_id}/stream` (SSE) açıb agentləri real-time izləyir."""
+    db_university = db.query(models.University).filter(models.University.id == university_id).first()
+    if not db_university:
+        raise HTTPException(status_code=404, detail="Universitet bazada tapılmadı!")
+
+    run = crud.start_run(db, university_id, run_type="live")
+    background_tasks.add_task(_run_pipeline_task, university_id, run.id)
+    return {"status": "started", "run_id": run.id, "university_name": db_university.name}
+
+
+def _run_snapshot(db: Session, run_id: int) -> dict:
+    """Bir icranın cari vəziyyətini (run + addımlar) JSON kimi qaytarır."""
+    run = db.query(models.AgentRun).filter(models.AgentRun.id == run_id).first()
+    if not run:
+        return None
+    steps = [
+        {"agent_name": s.agent_name, "status": s.status,
+         "duration_ms": s.duration_ms, "output_summary": s.output_summary,
+         "log_text": s.log_text}
+        for s in run.steps
+    ]
+    return {
+        "run_id": run.id, "status": run.status, "run_type": run.run_type,
+        "metrics": run.metrics_json, "error": run.error_text, "steps": steps,
+    }
+
+
+@app.get("/runs/{run_id}", response_model=dict, tags=["Agent Pipeline"])
+def get_run(run_id: int, db: Session = Depends(get_db)):
+    """Polling fallback — icranın cari vəziyyəti."""
+    snap = _run_snapshot(db, run_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="Run tapılmadı")
+    return snap
+
+
+@app.get("/runs/{run_id}/stream", tags=["Agent Pipeline"])
+def stream_run(run_id: int):
+    """SSE axını — icra bitənə qədər agent addımlarını real-time ötürür."""
+    def event_gen():
+        last_payload = None
+        for _ in range(600):  # ~5 dəq təhlükəsizlik limiti
+            db = SessionLocal()
+            try:
+                snap = _run_snapshot(db, run_id)
+            finally:
+                db.close()
+            if snap is None:
+                yield f"event: error\ndata: {json.dumps({'detail': 'run not found'})}\n\n"
+                return
+            payload = json.dumps(snap, ensure_ascii=False)
+            if payload != last_payload:
+                yield f"data: {payload}\n\n"
+                last_payload = payload
+            if snap["status"] in ("success", "failed"):
+                yield f"event: done\ndata: {payload}\n\n"
+                return
+            _time.sleep(0.8)
+        yield f"event: done\ndata: {json.dumps({'status': 'timeout'})}\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # =====================================================================
@@ -347,6 +430,77 @@ def reject_program(program_id: int, db: Session = Depends(get_db)):
     prog.status = "rejected"
     db.commit()
     return {"status": "success", "message": "Proqram rədd edildi."}
+
+
+# Redaktə/diff üçün izlənən sahələr
+_EDITABLE_FIELDS = [
+    "faculty", "program_name", "degree", "language", "tuition_fee",
+    "requirements", "application_deadline", "gpa_requirement", "documents_required",
+]
+
+
+@app.get("/programs/{program_id}/diff", response_model=dict, tags=["Human Review Panel"])
+def get_program_diff(program_id: int, db: Session = Depends(get_db)):
+    """Proqramın cari versiyasını əvvəlki versiya ilə sahə-sahə müqayisə edir.
+
+    Side-by-side review ekranı üçün — hər sahə üçün (old, new, changed) qaytarır.
+    Əvvəlki versiya yoxdursa (ilk snapshot), old=null, changed=False."""
+    prog = db.query(models.Program).filter(models.Program.id == program_id).first()
+    if not prog:
+        raise HTTPException(status_code=404, detail="Proqram tapılmadı")
+
+    versions = (
+        db.query(models.ProgramVersion)
+        .filter(models.ProgramVersion.program_id == program_id)
+        .order_by(models.ProgramVersion.version_no.desc())
+        .all()
+    )
+    current = versions[0] if versions else None
+    previous = versions[1] if len(versions) > 1 else None
+
+    fields = {}
+    for f in _EDITABLE_FIELDS:
+        new_val = getattr(current, f, None) if current else getattr(prog, f, None)
+        old_val = getattr(previous, f, None) if previous else None
+        changed = previous is not None and (str(old_val or "") != str(new_val or ""))
+        fields[f] = {"old": old_val, "new": new_val, "changed": changed}
+
+    return {
+        "program_id": program_id,
+        "program_name": prog.program_name,
+        "university_name": prog.university.name if prog.university else None,
+        "confidence_score": prog.confidence_score,
+        "field_confidence": prog.field_confidence,
+        "status": prog.status,
+        "current_version_no": current.version_no if current else None,
+        "previous_version_no": previous.version_no if previous else None,
+        "source_url": current.source_url if current else None,
+        "fields": fields,
+    }
+
+
+@app.patch("/programs/{program_id}", response_model=dict, tags=["Human Review Panel"])
+def edit_program(program_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+    """İdarəçi qeydi düzəldəndə sahələri yeniləyir və yeni versiya snapshot-u yazır.
+
+    Yalnız `_EDITABLE_FIELDS` daxilindəki açarlar qəbul edilir. Redaktədən sonra
+    istəyə görə status da (approved/pending_review/rejected) təyin oluna bilər."""
+    prog = db.query(models.Program).filter(models.Program.id == program_id).first()
+    if not prog:
+        raise HTTPException(status_code=404, detail="Proqram tapılmadı")
+
+    for key, value in payload.items():
+        if key in _EDITABLE_FIELDS:
+            setattr(prog, key, value)
+    new_status = payload.get("status")
+    if new_status in ("approved", "pending_review", "rejected"):
+        prog.status = new_status
+
+    prog.extracted_at = func.now()
+    crud.record_version(db, prog, source_url="manual-edit")  # redaktə də tarixçəyə düşür
+    db.commit()
+    return {"status": "success", "message": "Proqram redaktə olundu və yeni versiya yazıldı.",
+            "program_id": program_id}
 
 
 # =====================================================================
