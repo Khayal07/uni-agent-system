@@ -3,6 +3,36 @@ import ssl
 import time
 import urllib.request
 
+# Anti-bot: cəhdlər arası fırlanan User-Agent-lər (layout drift / bloklamaya qarşı)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+]
+
+# Bloklanma/anti-bot səhifələrini tanıdan işarələr
+_BLOCK_MARKERS = [
+    "access denied", "are you human", "captcha", "verify you are",
+    "cloudflare", "request blocked", "bot detection", "unusual traffic",
+]
+
+
+def _pick_ua(attempt: int) -> str:
+    return USER_AGENTS[attempt % len(USER_AGENTS)]
+
+
+def _looks_blocked(html: str) -> bool:
+    """Cavabın bloklama/anti-bot səhifəsi olub-olmadığını təxmin edir.
+
+    Qısa gövdə + blok açar sözü → bloklanmış sayılır (real məzmun deyil)."""
+    if not html:
+        return False
+    low = html.lower()
+    if len(low) < 3000 and any(m in low for m in _BLOCK_MARKERS):
+        return True
+    return False
+
+
 # İxtisas səhifələrini tanıyan açar sözlər (xal verilir, LLM YOXDUR)
 PROGRAM_KEYWORDS = [
     "bachelor", "undergraduate", "program", "programs", "ixtisas", "ixtisaslar",
@@ -47,14 +77,10 @@ def rank_candidate_urls(hrefs: list, sitemap_urls: list, base_url: str) -> list:
     return [u for u, _ in scored[:5]]
 
 
-def _urllib_fetch(url: str, timeout: int = 20) -> str:
+def _urllib_fetch(url: str, timeout: int = 20, ua: str = None) -> str:
     """urllib fallback — User-Agent başlığı ilə xam HTML çəkir."""
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"},
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": ua or USER_AGENTS[0]})
         ctx = ssl._create_unverified_context()
         with urllib.request.urlopen(req, context=ctx, timeout=timeout) as r:
             return r.read().decode("utf-8", errors="ignore")
@@ -63,15 +89,13 @@ def _urllib_fetch(url: str, timeout: int = 20) -> str:
         return ""
 
 
-def _playwright_fetch(url: str, timeout: int = 20) -> str:
+def _playwright_fetch(url: str, timeout: int = 20, ua: str = None) -> str:
     """Playwright ilə JS-render olunmuş HTML; alınmasa boş string."""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page(user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120 Safari/537.36"))
+            page = browser.new_page(user_agent=ua or USER_AGENTS[0])
             page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
             # JS-render üçün qısa əlavə gözləmə (networkidle bəzi saytlarda heç sakitləşmir)
             try:
@@ -91,16 +115,23 @@ def fetch(url: str, timeout: int = 20, retries: int = 2) -> str:
 
     JS saytlarda urllib boş shell verir, Playwright qazanır; UCL kimi statik saytlarda
     isə Playwright erkən shell tutur, urllib tam siyahını verir. İkisindən uzunu götürülür.
-    Hər iki üsul boş qayıdarsa, exponential backoff ilə `retries` dəfə yenidən cəhd edilir."""
+    Hər cəhddə User-Agent fırlanır; bloklanmış cavab aşkarlanarsa atılır və yenidən
+    cəhd edilir (exponential backoff)."""
     for attempt in range(retries + 1):
-        pw = _playwright_fetch(url, timeout)
-        ul = _urllib_fetch(url, timeout)
+        ua = _pick_ua(attempt)
+        pw = _playwright_fetch(url, timeout, ua)
+        ul = _urllib_fetch(url, timeout, ua)
+        # Bloklanmış görünən cavabları at (real məzmun deyil)
+        if _looks_blocked(pw):
+            pw = ""
+        if _looks_blocked(ul):
+            ul = ""
         html = pw if len(pw) >= len(ul) else ul
         if html:
             return html
         if attempt < retries:
             backoff = 2 ** attempt  # 1s, 2s, ...
-            print(f"[Crawler] {url} boş qayıtdı — {backoff}s sonra yenidən cəhd ({attempt + 1}/{retries})")
+            print(f"[Crawler] {url} boş/bloklanmış — UA fırlanır, {backoff}s sonra yenidən ({attempt + 1}/{retries})")
             time.sleep(backoff)
     return ""
 

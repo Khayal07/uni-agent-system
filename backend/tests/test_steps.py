@@ -273,6 +273,29 @@ def test_parse_sitemap_extracts_locs():
 
 
 # ----------------------------------------------------------------------
+# Crawler — anti-bot: UA rotasiyası + blok aşkarlama
+# ----------------------------------------------------------------------
+from app.agents.crawler import _looks_blocked, _pick_ua, USER_AGENTS
+
+
+def test_looks_blocked_detects_captcha_page():
+    assert _looks_blocked("<html><body>Please verify you are human. Captcha</body></html>")
+    assert _looks_blocked("Access denied — request blocked by Cloudflare")
+
+
+def test_looks_blocked_ignores_real_content():
+    real = "Maliyyə ixtisası " * 400  # uzun, real məzmun (blok açar sözü yox)
+    assert not _looks_blocked(real)
+    assert not _looks_blocked("")
+
+
+def test_pick_ua_rotates():
+    uas = {_pick_ua(i) for i in range(len(USER_AGENTS))}
+    assert len(uas) == len(USER_AGENTS)      # hər cəhddə fərqli UA
+    assert _pick_ua(0) == _pick_ua(len(USER_AGENTS))  # dövri
+
+
+# ----------------------------------------------------------------------
 # Extraction — chunk + dedupe (15000 kəsimi əvəzinə)
 # ----------------------------------------------------------------------
 from app.agents.extraction import ExtractionAgent
