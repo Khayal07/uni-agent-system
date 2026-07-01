@@ -7,7 +7,7 @@ import ssl
 # Verilənlər bazası strukturlarımız
 from .database import engine, get_db
 from . import models, schemas, crud
-from .config import CONFIDENCE_THRESHOLD
+from .config import CONFIDENCE_THRESHOLD, DATABASE_URL
 from .seed.seed_data import SEED_UNIVERSITIES, UPDATES
 
 # 5 Canavar Agentin importu
@@ -40,8 +40,11 @@ app = FastAPI(title="UniAgent: Multi-Agent University Data Pipeline")
 # Statik frontend faylları (styles.css, app.js) /static altında verilir
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
-# Tətbiq qalxan kimi DB cədvəllərini yaradırıq (təmiz mühitdə də işləsin deyə)
-models.Base.metadata.create_all(bind=engine)
+# SQLite dev-də sıfır-konfiqurasiya üçün cədvəlləri avtomatik yaradırıq.
+# Postgres/managed mühitdə isə sxem Alembic (`alembic upgrade head`) tərəfindən idarə olunur
+# — ikili yaratma konfliktini önləmək üçün create_all yalnız SQLite-də çağırılır.
+if DATABASE_URL.startswith("sqlite"):
+    models.Base.metadata.create_all(bind=engine)
 
 def helper_scrape(url: str) -> str:
     """Universitet saytından bloklanmadan xam HTML çəkən köməkçi funksiya"""
@@ -57,9 +60,10 @@ def helper_scrape(url: str) -> str:
         raise HTTPException(status_code=400, detail=f"Sayt oxunarkən xəta baş verdi: {str(e)}")
 
 
-def integrate_programs(db: Session, university_id: int, valid_programs: list):
+def integrate_programs(db: Session, university_id: int, valid_programs: list, source_url: str = None):
     """Change Detector-i işə salır və nəticələri bazaya yazır (yeni/yenilənən).
 
+    Hər yeni/yenilənən proqram üçün `ProgramVersion` snapshot-u yazılır (tarixi versiyalama).
     Həm canlı pipeline, həm də seed/simulyasiya endpointləri tərəfindən istifadə olunur.
     Geriyə (change_report, pending_count) qaytarır."""
     change_report = change_detector_agent.detect_changes(db, university_id, valid_programs)
@@ -72,7 +76,7 @@ def integrate_programs(db: Session, university_id: int, valid_programs: list):
         if status == "pending_review":
             pending_count += 1
 
-        db.add(models.Program(
+        db_prog = models.Program(
             university_id=university_id,
             faculty=new_prog.get("faculty"),
             program_name=new_prog.get("program_name"),
@@ -86,7 +90,10 @@ def integrate_programs(db: Session, university_id: int, valid_programs: list):
             confidence_score=score,
             field_confidence=new_prog.get("field_confidence"),
             status=status
-        ))
+        )
+        db.add(db_prog)
+        db.flush()  # id almaq üçün
+        crud.record_version(db, db_prog, source_url)  # ilkin (v1) snapshot
 
     for updated_prog in change_report["updated"]:
         db_prog_row = db.query(models.Program).filter(models.Program.id == updated_prog["id"]).first()
@@ -102,6 +109,7 @@ def integrate_programs(db: Session, university_id: int, valid_programs: list):
             db_prog_row.confidence_score = updated_prog.get("confidence_score", db_prog_row.confidence_score)
             db_prog_row.field_confidence = updated_prog.get("field_confidence")
             db_prog_row.extracted_at = func.now()
+            crud.record_version(db, db_prog_row, source_url)  # yeni versiya snapshot-u
 
     db.commit()
     return change_report, pending_count
@@ -222,64 +230,78 @@ def run_university_agent_pipeline(university_id: int, db: Session = Depends(get_
     base_url = db_university.website_url
     print(f"\n[START PIPELINE] -> {db_university.name} prosesi başladı...")
 
-    # STAGE 1-2: Skrap (Playwright) + heuristik link seçimi (LLM YOX)
-    home_html = crawler.fetch(base_url)
-    sitemap = crawler.discover_sitemap_urls(base_url)
-    hrefs = research_agent.extract_all_links(home_html, base_url)
-    candidates = crawler.rank_candidate_urls(hrefs, sitemap, base_url)
+    # Audit: bu icra üçün AgentRun qeydi yaradılır (uğur/xəta + metriklər burada saxlanır)
+    run = crud.start_run(db, university_id, run_type="live")
 
-    # STAGE 3: Namizəd səhifələri çək, mətnləri birləşdir (ən çox 5)
-    pages_html = [home_html]
-    for url in candidates[:5]:
-        html = crawler.fetch(url)
-        if html:
-            pages_html.append(html)
-            db.add(models.ScrapedPage(university_id=university_id, url=url, raw_html=html))
-    target_url = candidates[0] if candidates else base_url
-    combined_html = "\n".join(pages_html)
+    try:
+        # STAGE 1-2: Skrap (Playwright) + heuristik link seçimi (LLM YOX)
+        home_html = crawler.fetch(base_url)
+        sitemap = crawler.discover_sitemap_urls(base_url)
+        hrefs = research_agent.extract_all_links(home_html, base_url)
+        candidates = crawler.rank_candidate_urls(hrefs, sitemap, base_url)
 
-    # STAGE 4: Extraction Agent (chunk + dedupe)
-    raw_programs = extraction_agent.extract_programs(combined_html)
-    if not raw_programs:
-        return {"status": "warning", "message": "İxtisas tapılmadı.", "reviewer_report": "[RƏDD EDİLDİ] Data boşdur."}
+        # STAGE 3: Namizəd səhifələri çək, mətnləri birləşdir (ən çox 5)
+        pages_html = [home_html]
+        for url in candidates[:5]:
+            html = crawler.fetch(url)
+            if html:
+                pages_html.append(html)
+                db.add(models.ScrapedPage(university_id=university_id, url=url, raw_html=html))
+        target_url = candidates[0] if candidates else base_url
+        combined_html = "\n".join(pages_html)
 
-    # STAGE 5: Validation Agent — səhifə mətni ilə müqayisə + qayda-əsaslı confidence
-    source_text = extraction_agent.clean_html(combined_html)
-    valid_programs = validation_agent.validate_data(raw_programs, source_text)
+        # STAGE 4: Extraction Agent (chunk + dedupe)
+        raw_programs = extraction_agent.extract_programs(combined_html)
+        if not raw_programs:
+            crud.finish_run(db, run, "success", metrics={"total_processed": 0, "note": "no_programs"})
+            return {"status": "warning", "message": "İxtisas tapılmadı.",
+                    "run_id": run.id, "reviewer_report": "[RƏDD EDİLDİ] Data boşdur."}
 
-    # STAGE 6 & 7: Change Detector + Bazaya İnteqrasiya
-    change_report, pending_count = integrate_programs(db, university_id, valid_programs)
+        # STAGE 5: Validation Agent — səhifə mətni ilə müqayisə + qayda-əsaslı confidence
+        source_text = extraction_agent.clean_html(combined_html)
+        valid_programs = validation_agent.validate_data(raw_programs, source_text)
 
-    # Orta etibarlılıq balı (metrik)
-    avg_confidence = (
-        round(sum(p.get("confidence_score", 0) for p in valid_programs) / len(valid_programs), 3)
-        if valid_programs else 0
-    )
+        # STAGE 6 & 7: Change Detector + Bazaya İnteqrasiya (versiyalama daxil)
+        change_report, pending_count = integrate_programs(db, university_id, valid_programs, target_url)
 
-    # STAGE 8: Reviewer Agent (Yekun Hesabat)
-    final_report = reviewer_agent.review_pipeline(
-        university_name=db_university.name,
-        target_url=target_url,
-        total_valid=len(valid_programs),
-        change_report=change_report,
-        avg_confidence=avg_confidence,
-        pending_count=pending_count
-    )
+        # Orta etibarlılıq balı (metrik)
+        avg_confidence = (
+            round(sum(p.get("confidence_score", 0) for p in valid_programs) / len(valid_programs), 3)
+            if valid_programs else 0
+        )
 
-    return {
-        "status": "success",
-        "university_name": db_university.name,
-        "source_url_used": target_url,
-        "metrics": {
+        # STAGE 8: Reviewer Agent (Yekun Hesabat)
+        final_report = reviewer_agent.review_pipeline(
+            university_name=db_university.name,
+            target_url=target_url,
+            total_valid=len(valid_programs),
+            change_report=change_report,
+            avg_confidence=avg_confidence,
+            pending_count=pending_count
+        )
+
+        metrics = {
             "total_processed": len(valid_programs),
             "new_added": len(change_report["new"]),
             "updated_fees": len(change_report["updated"]),
             "unchanged": change_report["unchanged_count"],
             "pending_count": pending_count,
             "avg_confidence": avg_confidence
-        },
-        "reviewer_report": final_report
-    }
+        }
+        crud.finish_run(db, run, "success", metrics=metrics)
+
+        return {
+            "status": "success",
+            "run_id": run.id,
+            "university_name": db_university.name,
+            "source_url_used": target_url,
+            "metrics": metrics,
+            "reviewer_report": final_report
+        }
+    except Exception as e:
+        db.rollback()
+        crud.finish_run(db, run, "failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Pipeline xətası: {str(e)}")
 
 
 # =====================================================================

@@ -17,8 +17,8 @@ for _stream in (sys.stdout, sys.stderr):
 # Lokal işə salmada .env-i yükləyirik (Docker-də onsuz da env-lər mövcuddur)
 load_dotenv()
 
-# Verilənlər bazası
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Verilənlər bazası — təyin olunmayıbsa lokal SQLite fallback (Postgres-siz iş üçün)
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./app.db"
 
 # OpenRouter (AI agentləri üçün)
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")

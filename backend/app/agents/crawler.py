@@ -1,5 +1,6 @@
 import re
 import ssl
+import time
 import urllib.request
 
 # İxtisas səhifələrini tanıyan açar sözlər (xal verilir, LLM YOXDUR)
@@ -85,14 +86,23 @@ def _playwright_fetch(url: str, timeout: int = 20) -> str:
         return ""
 
 
-def fetch(url: str, timeout: int = 20) -> str:
+def fetch(url: str, timeout: int = 20, retries: int = 2) -> str:
     """HTML çəkir: Playwright (JS-render) və urllib (statik server-render) — uzununu seçir.
 
     JS saytlarda urllib boş shell verir, Playwright qazanır; UCL kimi statik saytlarda
-    isə Playwright erkən shell tutur, urllib tam siyahını verir. İkisindən uzunu götürülür."""
-    pw = _playwright_fetch(url, timeout)
-    ul = _urllib_fetch(url, timeout)
-    return pw if len(pw) >= len(ul) else ul
+    isə Playwright erkən shell tutur, urllib tam siyahını verir. İkisindən uzunu götürülür.
+    Hər iki üsul boş qayıdarsa, exponential backoff ilə `retries` dəfə yenidən cəhd edilir."""
+    for attempt in range(retries + 1):
+        pw = _playwright_fetch(url, timeout)
+        ul = _urllib_fetch(url, timeout)
+        html = pw if len(pw) >= len(ul) else ul
+        if html:
+            return html
+        if attempt < retries:
+            backoff = 2 ** attempt  # 1s, 2s, ...
+            print(f"[Crawler] {url} boş qayıtdı — {backoff}s sonra yenidən cəhd ({attempt + 1}/{retries})")
+            time.sleep(backoff)
+    return ""
 
 
 def discover_sitemap_urls(base_url: str) -> list:

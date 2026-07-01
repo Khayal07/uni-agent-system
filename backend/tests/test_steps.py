@@ -246,3 +246,55 @@ def test_dedupe_removes_same_program_name():
     ]
     out = agent._dedupe(progs)
     assert len(out) == 2
+
+
+# ----------------------------------------------------------------------
+# Versiyalama (ProgramVersion) + audit helper-ləri
+# ----------------------------------------------------------------------
+from app import crud
+
+
+def test_content_hash_stable_and_field_sensitive():
+    p1 = {"program_name": "Maliyyə", "tuition_fee": "3500", "degree": "Bachelor"}
+    p2 = {"program_name": "Maliyyə", "tuition_fee": "3500", "degree": "Bachelor"}
+    p3 = {"program_name": "Maliyyə", "tuition_fee": "3800", "degree": "Bachelor"}  # fee dəyişib
+    assert crud.compute_content_hash(p1) == crud.compute_content_hash(p2)
+    assert crud.compute_content_hash(p1) != crud.compute_content_hash(p3)
+
+
+def test_record_version_creates_v1(db):
+    p = _seed_program(db, tuition_fee="3500")
+    v = crud.record_version(db, p, source_url="https://uni.edu/programs")
+    db.commit()
+    assert v.version_no == 1 and v.is_current is True and v.valid_to is None
+    assert p.current_version_id == v.id and p.content_hash == v.content_hash
+    assert v.source_url == "https://uni.edu/programs"
+
+
+def test_record_version_closes_previous_and_increments(db):
+    p = _seed_program(db, tuition_fee="3500")
+    crud.record_version(db, p)          # v1
+    db.commit()
+    p.tuition_fee = "3800"              # dəyişiklik
+    v2 = crud.record_version(db, p)     # v2
+    db.commit()
+
+    versions = db.query(models.ProgramVersion).filter(
+        models.ProgramVersion.program_id == p.id
+    ).order_by(models.ProgramVersion.version_no).all()
+    assert len(versions) == 2
+    assert versions[0].is_current is False and versions[0].valid_to is not None
+    assert versions[1].is_current is True and versions[1].version_no == 2
+    assert p.current_version_id == v2.id
+
+
+def test_agent_run_and_step_lifecycle(db):
+    run = crud.start_run(db, university_id=1, run_type="live")
+    assert run.status == "running"
+    step = crud.start_step(db, run.id, "extraction", input_summary="html len=1000")
+    crud.finish_step(db, step, status="done", output_summary="5 programs")
+    crud.finish_run(db, run, status="success", metrics={"total": 5})
+
+    assert step.status == "done" and step.duration_ms is not None
+    assert run.status == "success" and run.finished_at is not None
+    assert run.metrics_json == {"total": 5}

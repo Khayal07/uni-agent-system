@@ -10,4 +10,5 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 COPY backend/ /code/
 COPY frontend/ /frontend/
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Postgres-də sxemi Alembic idarə edir — start-da miqrasiya, sonra server
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
