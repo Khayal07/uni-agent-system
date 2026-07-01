@@ -132,6 +132,38 @@ def test_change_detector_unchanged(db):
     assert report["unchanged_count"] == 1
 
 
+def test_semantic_equal_ignores_formatting():
+    from app.agents.change_detector import _semantic_equal
+    # Yalnız durğu/sıralama/böyük-kiçik fərqi — eyni sayılmalı
+    assert _semantic_equal("Attestat, şəxsiyyət vəsiqəsi", "şəxsiyyət vəsiqəsi Attestat")
+    assert _semantic_equal("IELTS 5.5; Attestat", "ielts 5.5 attestat")
+
+
+def test_semantic_equal_detects_real_difference():
+    from app.agents.change_detector import _semantic_equal
+    assert not _semantic_equal("Attestat, IELTS 5.5", "Attestat, IELTS 7.0, motivasiya məktubu")
+
+
+def test_change_detector_semantic_docs_not_flagged(db):
+    """Sənədlər sahəsində yalnız format/sıralama fərqi 'dəyişiklik' sayılmamalıdır."""
+    _seed_program(db, documents_required="Attestat, şəxsiyyət vəsiqəsi, foto")
+    agent = ChangeDetectorAgent()
+    incoming = [{"program_name": "Maliyyə", "degree": "Bachelor", "language": "Azerbaijani",
+                 "tuition_fee": "3500", "documents_required": "foto şəxsiyyət vəsiqəsi Attestat"}]
+    report = agent.detect_changes(db, university_id=1, incoming_programs=incoming)
+    assert report["unchanged_count"] == 1
+    assert len(report["updated"]) == 0
+
+
+def test_change_detector_semantic_docs_real_change_flagged(db):
+    _seed_program(db, documents_required="Attestat, foto")
+    agent = ChangeDetectorAgent()
+    incoming = [{"program_name": "Maliyyə", "degree": "Bachelor", "language": "Azerbaijani",
+                 "tuition_fee": "3500", "documents_required": "Attestat, foto, IELTS 6.5, motivasiya məktubu"}]
+    report = agent.detect_changes(db, university_id=1, incoming_programs=incoming)
+    assert len(report["updated"]) == 1
+
+
 def test_change_detector_no_false_new_on_language_change(db):
     """Dil dəyişikliyi 'yeni' yox, 'yenilənmiş' kimi qiymətləndirilməlidir (yanlış xəbərdarlıq yoxdur)."""
     _seed_program(db, language="Azerbaijani")

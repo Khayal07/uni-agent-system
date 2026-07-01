@@ -25,3 +25,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # Etibarlılıq balı bu həddən aşağı olanlar insan yoxlamasına göndərilir
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.75"))
+
+# Semantic dəyişiklik aşkarlama: mətn sahələrində oxşarlıq bu həddən yüksəkdirsə,
+# fərq "formatlaşma" sayılır və DƏYİŞİKLİK kimi qeyd olunmur (yanlış xəbərdarlıq azalır).
+SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.90"))

@@ -1,5 +1,8 @@
+import re
+from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
 from .. import models
+from ..config import SEMANTIC_SIMILARITY_THRESHOLD
 
 # Dəyişiklik üçün izlənən sahələr (incoming dict açarı == model atributu)
 TRACKED_FIELDS = [
@@ -12,9 +15,46 @@ TRACKED_FIELDS = [
     "faculty",
 ]
 
+# Uzun/sərbəst mətn sahələri — burada kiçik format fərqi dəyişiklik sayılmamalıdır.
+# Dəqiq sahələr (qiymət, tarix, GPA, dil) exact müqayisə ilə qalır.
+SEMANTIC_FIELDS = {"documents_required", "requirements"}
+
 
 def _norm(value) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _semantic_norm(text: str) -> str:
+    """Semantic müqayisə üçün dərin normalizasiya: kiçik hərf, durğu işarələrini at,
+    boşluqları yığ, tokenləri əlifba sırası ilə düz (sıralama fərqinə həssas olmasın)."""
+    t = re.sub(r"[^\wəçğışöü ]+", " ", str(text).lower(), flags=re.UNICODE)
+    tokens = sorted(w for w in t.split() if w)
+    return " ".join(tokens)
+
+
+def _semantic_equal(old: str, new: str, threshold: float = SEMANTIC_SIMILARITY_THRESHOLD) -> bool:
+    """İki mətnin mənaca eyni sayıla biləcəyini deterministik oxşarlıqla yoxlayır.
+
+    Token-Jaccard və difflib nisbətinin maksimumu həddi keçirsə, eyni sayılır
+    (yəni yalnız formatlaşma/sıralama/durğu fərqidir — əsl dəyişiklik deyil)."""
+    on, nn = _semantic_norm(old), _semantic_norm(new)
+    if on == nn:
+        return True
+    if not on or not nn:
+        return False
+    a, b = set(on.split()), set(nn.split())
+    jaccard = len(a & b) / len(a | b) if (a | b) else 0.0
+    ratio = SequenceMatcher(None, on, nn).ratio()
+    return max(jaccard, ratio) >= threshold
+
+
+def _field_unchanged(field: str, old_val: str, new_val: str) -> bool:
+    """Sahə üçün 'dəyişməyib' qərarı: semantic sahələrdə oxşarlıq, digərlərində exact."""
+    if old_val == new_val:
+        return True
+    if field in SEMANTIC_FIELDS:
+        return _semantic_equal(old_val, new_val)
+    return False
 
 
 class ChangeDetectorAgent:
@@ -63,7 +103,8 @@ class ChangeDetectorAgent:
             for field in TRACKED_FIELDS:
                 old_val = _norm(getattr(db_prog, field, None))
                 new_val = _norm(incoming.get(field))
-                if new_val != old_val:
+                # Semantic sahələrdə yalnız-format fərqi dəyişiklik sayılmır
+                if not _field_unchanged(field, old_val, new_val):
                     changed_fields.append({"field": field, "old": old_val, "new": new_val})
                     # Köhnə → yeni dəyişikliyi audit jurnalına yazırıq
                     db.add(
