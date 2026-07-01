@@ -186,6 +186,39 @@ def test_clean_html_strips_tags_and_scripts():
     assert "alert" not in text and "color:red" not in text
 
 
+def test_reviewer_rejects_meta_reasoning():
+    from app.agents.reviewer import ReviewerAgent
+    agent = ReviewerAgent()
+    # Modelin "düşüncə" mətni (screenshot-dakı kimi) → təmizləyici boş qaytarmalı
+    meta = ("We need to produce a professional high-level executive summary in Azerbaijani, "
+            "with approval tag. Must be concise 3-4 sentences. The metrics: ...")
+    assert agent._clean_summary(meta) == ""
+
+
+def test_reviewer_keeps_clean_summary():
+    from app.agents.reviewer import ReviewerAgent
+    agent = ReviewerAgent()
+    good = "[TƏSDİQLƏNDİ] Kent üzrə analiz tamamlandı: 5 yeni ixtisas bazaya inteqrasiya edildi."
+    assert agent._clean_summary(good).startswith("[TƏSDİQLƏNDİ]")
+
+
+def test_reviewer_strips_think_block():
+    from app.agents.reviewer import ReviewerAgent
+    agent = ReviewerAgent()
+    raw = "<think>plan qururam...</think>[TƏSDİQLƏNDİ] Analiz bitdi, 3 yeni ixtisas əlavə olundu."
+    out = agent._clean_summary(raw)
+    assert "think" not in out and out.startswith("[TƏSDİQLƏNDİ]")
+
+
+def test_reviewer_fallback_mentions_changes():
+    from app.agents.reviewer import ReviewerAgent
+    agent = ReviewerAgent()
+    report = {"new": [1, 2], "updated": [3], "unchanged_count": 4}
+    out = agent._fallback_summary("Kent", report, 0.58, 6)
+    assert out.startswith("[TƏSDİQLƏNDİ]")
+    assert "2 yeni" in out and "1 yenilənmiş" in out and "6 qeyd" in out
+
+
 def test_clean_html_drops_nav_and_footer():
     agent = ExtractionAgent()
     html = ("<body><nav>Ana səhifə Əlaqə Menyu</nav>"

@@ -1,6 +1,16 @@
 import os
+import re
 import requests
 import json
+
+# Modelin "düşüncə/meta" mətnini (yekun cavab yerinə) aşkarlayan işarələr
+_META_MARKERS = [
+    "we need to", "let's craft", "let's count", "that's 4 sentence", "that's 3 sentence",
+    "executive summary in azerbaijani", "must mention", "must be concise", "keep 3-4",
+    "provide summary", "the metrics", "so we can say", "here is", "here's the",
+    "okay,", "i will", "i'll", "as an ai",
+]
+
 
 class ReviewerAgent:
     def __init__(self):
@@ -8,15 +18,47 @@ class ReviewerAgent:
         self.model = os.getenv("OPENROUTER_MODEL_NAME", "openrouter/free")
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
+    def _fallback_summary(self, university_name, change_report, avg_confidence, pending_count) -> str:
+        """Metriklərdən deterministik, təmiz idarəçi icmalı qurur (model zibil verəndə)."""
+        new = len(change_report.get("new", []))
+        updated = len(change_report.get("updated", []))
+        stable = change_report.get("unchanged_count", 0)
+        avg = f"{avg_confidence:.2f}" if avg_confidence is not None else "—"
+        return (
+            f"[TƏSDİQLƏNDİ] {university_name} üzrə analiz uğurla tamamlandı: {new} yeni ixtisas "
+            f"və {updated} yenilənmiş sahə bazaya inteqrasiya edildi, {stable} ixtisas stabil qaldı. "
+            f"Orta etibarlılıq balı {avg}; aşağı etibarlılıqlı {pending_count} qeyd insan yoxlamasına yönləndirildi."
+        )
+
+    def _clean_summary(self, text: str) -> str:
+        """Model cavabından yalnız yekun icmalı çıxarır: <think> bloklarını, markdown-ı və
+        meta/planlama mətnini atır. Zibil görünürsə boş qaytarır (fallback işə düşür)."""
+        if not text:
+            return ""
+        # Reasoning modellərinin <think>...</think> bloklarını sil
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"```[a-z]*|```", "", text).strip()
+
+        # Təsdiq tagı varsa, oradan başlayan hissəni götür (əvvəldəki planlama atılır)
+        m = re.search(r"\[\s*T[ƏEÆ]SD[İIi]QL[ƏEÆ]ND[İIi]\s*\]", text, flags=re.IGNORECASE)
+        has_tag = m is not None
+        if m:
+            text = text[m.start():].strip()
+
+        low = text.lower()
+        # Hələ də ingilis meta/planlama mətni varsa — zibil, fallback-a düş
+        if any(mk in low for mk in _META_MARKERS):
+            return ""
+        # Təsdiq tagı yoxdursa və ya həddindən uzundursa — etibarsız
+        if not has_tag or len(text) > 900:
+            return ""
+        return text
+
     def review_pipeline(self, university_name: str, target_url: str, total_valid: int,
                         change_report: dict, avg_confidence: float = None, pending_count: int = 0) -> str:
         """Bütün agentlərin işini icmal edir və yekun idarəçi hesabatı hazırlayır"""
         if not self.api_key:
-            return (
-                f"[TƏSDİQLƏNDİ] {university_name} üzrə analiz tamamlandı. "
-                f"{total_valid} ixtisas emal olundu, {len(change_report.get('new', []))} yeni, "
-                f"{pending_count} ədəd insan yoxlamasına göndərildi."
-            )
+            return self._fallback_summary(university_name, change_report, avg_confidence, pending_count)
 
         # Agentlərin çıxardığı nəticələrin xülasəsi
         summary_metrics = {
@@ -41,8 +83,9 @@ class ReviewerAgent:
         Guidelines:
         1. Keep the summary concise (maximum 3-4 sentences).
         2. Use a professional, technical, and analytical tone.
-        3. Start with an approval tag like "[TƏSDİQLƏNDİ]".
-        4. Explicitly mention if any data changes (new programs or updated tuition fees) were successfully integrated into the database.
+        3. Start with an approval tag exactly: "[TƏSDİQLƏNDİ]".
+        4. Explicitly mention if any data changes (new programs or updated fields) were successfully integrated into the database.
+        5. CRITICAL: Output ONLY the final Azerbaijani summary text. Do NOT include your reasoning, planning notes, English commentary, quotes, or restate the task. Return just the summary, nothing else.
         """
 
         headers = {
@@ -53,17 +96,20 @@ class ReviewerAgent:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 500,
-            "temperature": 0.3
+            "temperature": 0.2
         }
 
         try:
             response = requests.post(self.url, json=payload, headers=headers, timeout=20)
             if response.status_code == 200:
-                summary_text = response.json()['choices'][0]['message']['content'].strip()
-                print(f"[Reviewer Agent]: Yekun əməliyyat hesabatı imzalandı.")
-                return summary_text
+                raw = response.json()['choices'][0]['message']['content'].strip()
+                cleaned = self._clean_summary(raw)
+                if cleaned:
+                    print("[Reviewer Agent]: Yekun əməliyyat hesabatı imzalandı.")
+                    return cleaned
+                print("[Reviewer Agent]: model meta/zibil qaytardı — deterministik icmala keçilir.")
         except Exception as e:
             print(f"[Reviewer Agent Xətası]: {str(e)}")
-            
-        # Əgər AI şəbəkədə ilişərsə, default olaraq bunu qaytarırıq
-        return f"[TƏSDİQLƏNDİ] {university_name} üzrə skraplama və analiz uğurla tamamlandı. Sistem bazaya {len(change_report['new'])} yeni ixtisas yazdı."
+
+        # Model ilişərsə və ya təmiz icmal vermirsə — həmişə etibarlı deterministik fallback
+        return self._fallback_summary(university_name, change_report, avg_confidence, pending_count)
