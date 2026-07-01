@@ -202,6 +202,31 @@ table.register{width:100%;border-collapse:collapse;font-size:13px}
 .act.ok:hover{background:var(--verified);color:#06231a}
 .act.no{color:var(--rejected);border-color:rgba(224,107,107,.4)}
 .act.no:hover{background:var(--rejected);color:#2a0a0a}
+.act.rev{color:var(--gold-bright);border-color:var(--gold-soft)}
+.act.rev:hover{background:var(--gold-soft)}
+
+/* ---------- Human review · side-by-side diff modal ---------- */
+.review-card{width:min(760px,94vw);max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:26px 26px 22px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.review-head{display:flex;align-items:flex-start;gap:16px;padding-bottom:16px;border-bottom:1px solid var(--line);position:relative}
+.review-head h3{font-family:"Fraunces",serif;font-weight:600;font-size:21px;margin:6px 0 4px}
+.rev-sub{font-size:12px;color:var(--dim)}
+.rev-sub a{color:var(--gold-bright);text-decoration:none}
+.rev-conf{margin-left:auto;text-align:right;flex:none}
+.rev-conf .rlabel{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:5px}
+.rev-close{position:absolute;top:-6px;right:-6px;background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:6px;line-height:1}
+.rev-close:hover{color:var(--bone)}
+.review-cols-head,.review-row{display:grid;grid-template-columns:1.1fr 1.4fr 1.4fr .9fr;gap:12px;align-items:center}
+.review-cols-head{padding:14px 4px 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+.review-row{padding:10px 4px;border-bottom:1px solid var(--line);font-size:13px}
+.review-row.is-changed{background:linear-gradient(90deg,var(--gold-soft),transparent);border-radius:8px}
+.rv-label{color:var(--dim);font-weight:600;display:flex;align-items:center;gap:6px}
+.rv-label .dot{width:6px;height:6px;border-radius:50%;background:var(--gold-bright);display:inline-block}
+.rv-old{color:var(--faint)}
+.review-row.is-changed .rv-old{text-decoration:line-through;text-decoration-color:rgba(224,107,107,.5)}
+.review-row.is-changed .rv-new{color:var(--gold-bright);font-weight:600}
+.rev-input{padding:6px 9px;font-size:12.5px}
+.review-actions{display:flex;align-items:center;justify-content:space-between;margin-top:18px}
+.review-actions-right{display:flex;gap:10px}
 
 /* ---------- Loading overlay: agent pipeline ---------- */
 .overlay{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;background:rgba(8,10,14,.86);backdrop-filter:blur(8px)}

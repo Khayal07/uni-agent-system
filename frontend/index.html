@@ -166,6 +166,38 @@
   </section>
 </main>
 
+<!-- ===== Human Review · side-by-side diff modal ===== -->
+<div id="reviewModal" class="overlay hidden">
+  <div class="review-card">
+    <div class="review-head">
+      <div>
+        <span class="eyebrow"><b>İnsan yoxlaması</b> · müqayisə</span>
+        <h3 id="revTitle">—</h3>
+        <div class="rev-sub"><span id="revUni">—</span> · versiya <span id="revVer">—</span> ·
+          <a id="revSrc" href="#" target="_blank">mənbə</a></div>
+      </div>
+      <div class="rev-conf">
+        <div class="rlabel">Ümumi etibar</div>
+        <div id="revConf" class="rval">—</div>
+      </div>
+      <button class="rev-close" onclick="closeReview()" title="Bağla">✕</button>
+    </div>
+
+    <div class="review-cols-head">
+      <span>Sahə</span><span>Köhnə</span><span>Yeni</span><span>Etibar</span>
+    </div>
+    <div id="revRows" class="review-rows"></div>
+
+    <div class="review-actions">
+      <button id="revEditBtn" class="btn btn-ghost" onclick="toggleEdit()">Redaktə et</button>
+      <div class="review-actions-right">
+        <button class="act no" onclick="reviewReject()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Rədd et</button>
+        <button class="act ok" onclick="reviewApprove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Təsdiqlə</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Loading overlay -->
 <div id="loadingOverlay" class="overlay hidden">
   <div class="overlay-card">

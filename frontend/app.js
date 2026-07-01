@@ -208,6 +208,7 @@ async function fetchPendingPrograms(){
           <div class="qmeta">${esc(p.faculty)||'Fakültə yoxdur'} · ${esc(p.tuition_fee)||'—'} · ${esc(p.language)||'—'} · son tarix ${esc(p.application_deadline)||'—'} · bal ${p.confidence_score!=null?Number(p.confidence_score).toFixed(2):'—'}</div>
         </div>
         <div class="qactions">
+          <button class="act rev" onclick="openReview(${p.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>İncələ</button>
           <button class="act ok" onclick="approveProgram(${p.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>Təsdiqlə</button>
           <button class="act no" onclick="rejectProgram(${p.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>Rədd et</button>
         </div>
@@ -218,6 +219,71 @@ async function fetchPendingPrograms(){
 
 async function approveProgram(id){try{if((await fetch(`${API}/programs/${id}/approve`,{method:'POST'})).ok)fetchPendingPrograms()}catch(e){alert('Təsdiqləmə uğursuz oldu.')}}
 async function rejectProgram(id){try{if((await fetch(`${API}/programs/${id}/reject`,{method:'POST'})).ok)fetchPendingPrograms()}catch(e){alert('Rədd etmə uğursuz oldu.')}}
+
+/* ---------- Human review · side-by-side diff ---------- */
+const FIELD_LABELS={faculty:'Fakültə',program_name:'İxtisas',degree:'Səviyyə',language:'Dil',tuition_fee:'Təhsil haqqı',requirements:'Şərtlər',application_deadline:'Son tarix',gpa_requirement:'GPA/bal',documents_required:'Sənədlər'};
+const EDITABLE_ORDER=['program_name','faculty','degree','language','tuition_fee','application_deadline','gpa_requirement','documents_required','requirements'];
+let _review={id:null,diff:null,editing:false};
+
+async function openReview(id){
+  try{
+    const diff=await (await fetch(`${API}/programs/${id}/diff`)).json();
+    if(diff.detail)return alert('Diff alınmadı.');
+    _review={id,diff,editing:false};
+    let fc={}; try{fc=JSON.parse(diff.field_confidence||'{}')}catch(e){}
+    document.getElementById('revTitle').innerText=diff.program_name||'—';
+    document.getElementById('revUni').innerText=diff.university_name||'—';
+    document.getElementById('revVer').innerText=(diff.previous_version_no?diff.previous_version_no+' → ':'')+(diff.current_version_no??'—');
+    const src=document.getElementById('revSrc'); src.href=diff.source_url||'#'; src.innerText=diff.source_url?'mənbə':'mənbə yoxdur';
+    document.getElementById('revConf').innerHTML=meter(diff.confidence_score);
+    renderReviewRows(fc);
+    document.getElementById('revEditBtn').innerText='Redaktə et';
+    document.getElementById('reviewModal').classList.remove('hidden');
+  }catch(e){alert('Review açıla bilmədi.')}
+}
+
+function renderReviewRows(fc){
+  const rows=document.getElementById('revRows'); rows.innerHTML='';
+  const F=_review.diff.fields;
+  EDITABLE_ORDER.forEach(k=>{
+    const v=F[k]; if(!v)return;
+    const changed=v.changed?'is-changed':'';
+    const conf=(fc[k]!=null)?meter(fc[k]):'<span class="muted" style="font-size:11px">—</span>';
+    const newCell=_review.editing
+      ? `<input class="input rev-input" data-field="${k}" value="${esc(v.new)}">`
+      : `<span class="rv-new">${esc(v.new)||'∅'}</span>`;
+    rows.innerHTML+=`
+      <div class="review-row ${changed}">
+        <span class="rv-label">${FIELD_LABELS[k]||k}${v.changed?'<i class="dot"></i>':''}</span>
+        <span class="rv-old">${esc(v.old)||'∅'}</span>
+        <span>${newCell}</span>
+        <span>${conf}</span>
+      </div>`;
+  });
+}
+
+function toggleEdit(){
+  _review.editing=!_review.editing;
+  let fc={}; try{fc=JSON.parse(_review.diff.field_confidence||'{}')}catch(e){}
+  renderReviewRows(fc);
+  document.getElementById('revEditBtn').innerText=_review.editing?'Yadda saxla':'Redaktə et';
+  if(!_review.editing)saveReviewEdits();
+}
+
+async function saveReviewEdits(){
+  const body={};
+  document.querySelectorAll('#revRows .rev-input').forEach(inp=>{body[inp.dataset.field]=inp.value});
+  if(!Object.keys(body).length)return;
+  try{
+    const r=await fetch(`${API}/programs/${_review.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){await openReview(_review.id)}  // yenilənmiş diff-i (yeni versiya) yenidən yüklə
+    else alert('Redaktə saxlanmadı.');
+  }catch(e){alert('Redaktə saxlanmadı.')}
+}
+
+async function reviewApprove(){await approveProgram(_review.id);closeReview()}
+async function reviewReject(){await rejectProgram(_review.id);closeReview()}
+function closeReview(){document.getElementById('reviewModal').classList.add('hidden')}
 
 async function simulateUpdate(id){
   try{
