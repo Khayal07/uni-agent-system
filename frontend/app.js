@@ -67,27 +67,84 @@ async function resetDatabase(){
   }catch(e){alert('Sıfırlama uğursuz oldu.')}
 }
 
-/* ---------- pipeline run ---------- */
+/* ---------- pipeline run (real-time SSE) ---------- */
 async function runPipeline(id){
   const ov=document.getElementById('loadingOverlay');
-  ov.classList.remove('hidden'); animatePipeline();
+  ov.classList.remove('hidden'); resetStages();
+  let started;
   try{
-    const data=await (await fetch(`${API}/universities/${id}/run-agent-pipeline`,{method:'POST'})).json();
-    if(data.status==='success'){
-      const m=data.metrics;
-      document.getElementById('mProcessed').innerText=m.total_processed;
-      document.getElementById('mNew').innerText=m.new_added;
-      document.getElementById('mUpdated').innerText=m.updated_fees;
-      document.getElementById('mUnchanged').innerText=m.unchanged;
-      document.getElementById('mPending').innerText=m.pending_count ?? 0;
-      document.getElementById('mConf').innerText=(m.avg_confidence!=null?Number(m.avg_confidence).toFixed(2):'—');
-      document.getElementById('uniBadge').innerText=data.university_name;
-      document.getElementById('reportText').innerText=data.reviewer_report;
-      const a=document.getElementById('usedUrl'); a.href=data.source_url_used; a.innerText=data.source_url_used;
-      showResults(id);
-    }else{alert(data.message||'Pipeline tamamlanmadı.')}
-  }catch(e){alert('Daxili xəta.')}
-  finally{ov.classList.add('hidden')}
+    started=await (await fetch(`${API}/universities/${id}/run-agent-pipeline`,{method:'POST'})).json();
+  }catch(e){ov.classList.add('hidden');return alert('Pipeline başladıla bilmədi.')}
+  if(!started.run_id){ov.classList.add('hidden');return alert(started.message||'Pipeline başlamadı.')}
+  streamRun(started.run_id, id);
+}
+
+/* Bir icranın snapshot-unu overlay mərhələlərinə tətbiq edir */
+function applySnapshot(snap){
+  const stages=[...document.querySelectorAll('#pipelineStages .stage')];
+  const byAgent={}; (snap.steps||[]).forEach(s=>byAgent[s.agent_name]=s);
+  let activeName='';
+  stages.forEach(st=>{
+    const a=st.dataset.agent, s=byAgent[a];
+    st.classList.remove('live','done','failed');
+    const out=st.querySelector('.sout');
+    if(!s){if(out)out.innerText='';return}
+    if(s.status==='running'){st.classList.add('live');activeName=a}
+    else if(s.status==='done'){st.classList.add('done')}
+    else if(s.status==='failed'){st.classList.add('failed');activeName=a}
+    if(out)out.innerText=s.output_summary||'';
+  });
+  const note=document.getElementById('overlayNote');
+  if(note&&activeName)note.innerText=`Aktiv agent: ${activeName}`;
+}
+
+function streamRun(runId, uniId){
+  const ov=document.getElementById('loadingOverlay');
+  const finish=(snap)=>{
+    ov.classList.add('hidden');
+    if(!snap||snap.status!=='success'){
+      if(snap&&snap.status==='failed')alert('Pipeline xətası: '+(snap.error||'naməlum'));
+      fetchUniversities();return;
+    }
+    const m=snap.metrics||{};
+    document.getElementById('mProcessed').innerText=m.total_processed ?? 0;
+    document.getElementById('mNew').innerText=m.new_added ?? 0;
+    document.getElementById('mUpdated').innerText=m.updated_fees ?? 0;
+    document.getElementById('mUnchanged').innerText=m.unchanged ?? 0;
+    document.getElementById('mPending').innerText=m.pending_count ?? 0;
+    document.getElementById('mConf').innerText=(m.avg_confidence!=null?Number(m.avg_confidence).toFixed(2):'—');
+    document.getElementById('uniBadge').innerText=m.university_name||'—';
+    document.getElementById('reportText').innerText=m.reviewer_report||'—';
+    const a=document.getElementById('usedUrl'); a.href=m.source_url_used||'#'; a.innerText=m.source_url_used||'—';
+    showResults(uniId);
+  };
+  try{
+    const es=new EventSource(`${API}/runs/${runId}/stream`);
+    es.onmessage=(ev)=>{try{applySnapshot(JSON.parse(ev.data))}catch(e){}};
+    es.addEventListener('done',(ev)=>{es.close();let snap=null;try{snap=JSON.parse(ev.data)}catch(e){}finish(snap)});
+    es.onerror=()=>{es.close();pollRun(runId,uniId,finish)};  // SSE tutmasa polling-ə keç
+  }catch(e){pollRun(runId,uniId,finish)}
+}
+
+/* SSE dəstəklənmirsə polling fallback */
+function pollRun(runId, uniId, finish){
+  const tick=async()=>{
+    try{
+      const snap=await (await fetch(`${API}/runs/${runId}`)).json();
+      applySnapshot(snap);
+      if(snap.status==='success'||snap.status==='failed')return finish(snap);
+    }catch(e){}
+    setTimeout(tick,1000);
+  };
+  tick();
+}
+
+function resetStages(){
+  document.querySelectorAll('#pipelineStages .stage').forEach(s=>{
+    s.classList.remove('live','done','failed');
+    const o=s.querySelector('.sout'); if(o)o.innerText='';
+  });
+  const note=document.getElementById('overlayNote'); if(note)note.innerText='Agentlər başladılır…';
 }
 
 function showResults(id){
@@ -169,20 +226,6 @@ async function simulateUpdate(id){
     alert(`Simulyasiya bitdi — yeni: ${d.metrics.new_added}, dəyişən sahə: ${d.metrics.updated_fields}.`);
     runPipelineRefresh(id);
   }catch(e){alert('Simulyasiya uğursuz oldu.')}
-}
-
-/* ---------- pipeline overlay animation ---------- */
-function animatePipeline(){
-  const stages=[...document.querySelectorAll('#pipelineStages .stage')];
-  stages.forEach(s=>s.classList.remove('live','done'));
-  let i=0;
-  function step(){
-    if(i>0)stages[i-1]?.classList.add('done');
-    stages.forEach((s,k)=>{if(k<i)s.classList.add('done')});
-    if(i<stages.length){stages[i].classList.remove('done');stages[i].classList.add('live');i++;
-      window._pipeTimer=setTimeout(step,520);}
-  }
-  clearTimeout(window._pipeTimer); step();
 }
 
 window.onload=()=>{fetchUniversities();fetchPendingPrograms()};
