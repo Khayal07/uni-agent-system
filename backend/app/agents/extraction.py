@@ -36,14 +36,27 @@ class ExtractionAgent:
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def clean_html(self, raw_html: str) -> str:
-        """HTML-dən skriptləri, stilləri və lazımsız teqləri təmizləyib təmiz mətn qaytarır.
+        """HTML-dən struktur-aware təmiz mətn çıxarır (token-səmərəli).
 
-        Əsas üsul BeautifulSoup-dur; hər hansı səbəbdən alınmasa regex-ə geri düşür."""
+        Skript/stil + səhifə "chrome"-u (nav, footer, header, aside, form) atılır ki,
+        LLM-ə yalnız məzmun getsin. <main>/<article> varsa və kifayət qədər doludursa,
+        yalnız onlar götürülür (token azalır). Alınmasa regex fallback."""
         try:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(raw_html, "html.parser")
-            for tag in soup(["script", "style", "noscript"]):
+            # Skript/stil + naviqasiya/altbilgi kimi məzmunsuz bölmələri at
+            for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "form"]):
                 tag.decompose()
+
+            # Semantik məzmun konteynerləri varsa, onlara üstünlük ver (token qənaəti)
+            main_nodes = soup.find_all(["main", "article"])
+            if main_nodes:
+                main_text = " ".join(n.get_text(separator=" ") for n in main_nodes)
+                main_clean = re.sub(r"\s+", " ", main_text).strip()
+                # Yalnız kifayət qədər doludursa istifadə et; əks halda tam body-yə düş
+                if len(main_clean) >= 500:
+                    return main_clean
+
             text = soup.get_text(separator=" ")
             return re.sub(r"\s+", " ", text).strip()
         except Exception:

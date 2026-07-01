@@ -186,6 +186,25 @@ def test_clean_html_strips_tags_and_scripts():
     assert "alert" not in text and "color:red" not in text
 
 
+def test_clean_html_drops_nav_and_footer():
+    agent = ExtractionAgent()
+    html = ("<body><nav>Ana səhifə Əlaqə Menyu</nav>"
+            "<main><h1>Maliyyə</h1><p>3500 AZN</p></main>"
+            "<footer>Bütün hüquqlar qorunur 2026</footer></body>")
+    text = agent.clean_html(html)
+    assert "Maliyyə" in text and "3500" in text
+    assert "Menyu" not in text and "hüquqlar" not in text
+
+
+def test_clean_html_falls_back_when_main_too_small():
+    """<main> çox qısadırsa, tam body götürülməlidir (məzmun itməsin)."""
+    agent = ExtractionAgent()
+    body_text = "Maliyyə " * 100  # böyük məzmun body-də
+    html = f"<body><main>qısa</main><section>{body_text}</section></body>"
+    text = agent.clean_html(html)
+    assert text.count("Maliyyə") >= 50
+
+
 def test_parse_json_block_handles_fences_and_think_tags():
     raw = "<think>düşünürəm...</think>```json\n[{\"program_name\": \"Maliyyə\"}]\n```"
     data = parse_json_block(raw)
