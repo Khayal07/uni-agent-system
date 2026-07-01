@@ -9,7 +9,7 @@ import time as _time
 # Verilənlər bazası strukturlarımız
 from .database import engine, get_db, SessionLocal
 from . import models, schemas, crud
-from .config import CONFIDENCE_THRESHOLD, DATABASE_URL
+from .config import CONFIDENCE_THRESHOLD, DATABASE_URL, EXTRACTION_RETRY_ENABLED
 from .seed.seed_data import SEED_UNIVERSITIES, UPDATES
 
 # 5 Canavar Agentin importu
@@ -262,15 +262,30 @@ def _run_pipeline_task(university_id: int, run_id: int):
                             metrics={"total_processed": 0, "note": "no_programs", "source_url_used": target_url})
             return
 
-        # STEP 3: Validation
+        # STEP 3: Validation (+ aşağı etibarlılıqda strict auto-retry)
         current_step = crud.start_step(db, run_id, "validation", input_summary=f"{len(raw_programs)} ixtisas")
         source_text = extraction_agent.clean_html(combined_html)
         valid_programs = validation_agent.validate_data(raw_programs, source_text)
-        avg_confidence = (
-            round(sum(p.get("confidence_score", 0) for p in valid_programs) / len(valid_programs), 3)
-            if valid_programs else 0
+
+        def _avg(progs):
+            return round(sum(p.get("confidence_score", 0) for p in progs) / len(progs), 3) if progs else 0
+
+        avg_confidence = _avg(valid_programs)
+        retried = False
+        if EXTRACTION_RETRY_ENABLED and valid_programs and avg_confidence < CONFIDENCE_THRESHOLD:
+            print(f"[Pipeline] aşağı etibar ({avg_confidence}) — strict extraction retry...")
+            strict_raw = extraction_agent.extract_programs(combined_html, strict=True)
+            if strict_raw:
+                strict_valid = validation_agent.validate_data(strict_raw, source_text)
+                # Yalnız daha yaxşı orta etibar verirsə strict nəticəni götürürük
+                if _avg(strict_valid) > avg_confidence:
+                    valid_programs, avg_confidence, retried = strict_valid, _avg(strict_valid), True
+
+        crud.finish_step(
+            db, current_step,
+            output_summary=f"{len(valid_programs)} keçdi · orta etibar {avg_confidence}"
+                           + (" · strict retry" if retried else ""),
         )
-        crud.finish_step(db, current_step, output_summary=f"{len(valid_programs)} keçdi · orta etibar {avg_confidence}")
 
         # STEP 4: Change Detection + inteqrasiya (versiyalama daxil)
         current_step = crud.start_step(db, run_id, "change", input_summary=f"{len(valid_programs)} ixtisas")

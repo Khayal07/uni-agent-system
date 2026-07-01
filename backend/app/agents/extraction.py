@@ -74,8 +74,11 @@ class ExtractionAgent:
             out.append(p)
         return out
 
-    def extract_programs(self, raw_html: str) -> list:
-        """Təmizlənmiş mətndən universitet ixtisaslarını çıxarır (chunk + dedupe)"""
+    def extract_programs(self, raw_html: str, strict: bool = False) -> list:
+        """Təmizlənmiş mətndən universitet ixtisaslarını çıxarır (chunk + dedupe).
+
+        strict=True olduqda daha sərt/ciddi prompt işlədilir — aşağı etibarlılıqda
+        auto-retry üçün (bax: pipeline)."""
         if not self.api_key:
             print("[Extraction Agent Xətası]: API açarı tapılmadı!")
             return []
@@ -83,16 +86,27 @@ class ExtractionAgent:
         cleaned_text = self.clean_html(raw_html)
         all_programs = []
         for chunk in self._chunk_text(cleaned_text):
-            all_programs.extend(self._extract_chunk(chunk))
+            all_programs.extend(self._extract_chunk(chunk, strict=strict))
         result = self._dedupe(all_programs)
-        print(f"[Extraction Agent]: dedupe sonrası {len(result)} ixtisas.")
+        print(f"[Extraction Agent]: dedupe sonrası {len(result)} ixtisas (strict={strict}).")
         return result
 
-    def _extract_chunk(self, prompt_text: str) -> list:
-        """Bir mətn hissəsindən LLM ilə ixtisasları çıxarır."""
+    def _extract_chunk(self, prompt_text: str, strict: bool = False, _retry: bool = True) -> list:
+        """Bir mətn hissəsindən LLM ilə ixtisasları çıxarır.
+
+        Şəbəkə/parse uğursuzluğunda bir dəfə avtomatik yenidən cəhd edir (_retry)."""
+
+        strict_note = ""
+        if strict:
+            strict_note = (
+                "\n        STRICT MODE: Be extremely careful. Extract ONLY programs whose name "
+                "clearly appears in the text. Do NOT guess degree/fee/deadline — if a value is not "
+                "explicitly present, you MUST use null. Prefer fewer, fully-verifiable rows over many "
+                "uncertain ones.\n"
+            )
 
         prompt = f"""
-        You are the 'Extraction Agent'. Analyze the following text extracted from a university website and extract all available academic programs/majors.
+        You are the 'Extraction Agent'. Analyze the following text extracted from a university website and extract all available academic programs/majors.{strict_note}
 
         Text:
         {prompt_text}
@@ -126,7 +140,7 @@ class ExtractionAgent:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000,
-            "temperature": 0.1
+            "temperature": 0.0 if strict else 0.1  # strict-də determinizm
         }
 
         try:
@@ -134,12 +148,17 @@ class ExtractionAgent:
             if response.status_code == 200:
                 ai_res = response.json()['choices'][0]['message']['content'].strip()
                 programs = parse_json_block(ai_res)
-                if not isinstance(programs, list):
-                    print(f"[Extraction Agent Xətası]: JSON massiv kimi parse oluna bilmədi.")
-                    return []
-                print(f"[Extraction Agent]: {len(programs)} dənə ixtisas mətndən qoparılıb gətirildi.")
-                return programs
+                if isinstance(programs, list):
+                    print(f"[Extraction Agent]: {len(programs)} dənə ixtisas mətndən qoparılıb gətirildi.")
+                    return programs
+                print("[Extraction Agent Xətası]: JSON massiv kimi parse oluna bilmədi.")
+            else:
+                print(f"[Extraction Agent Xətası]: status {response.status_code}")
         except Exception as e:
             print(f"[Extraction Agent Xətası]: {str(e)}")
-            
+
+        # Uğursuzluqda bir dəfə avtomatik yenidən cəhd (auto-retry)
+        if _retry:
+            print("[Extraction Agent]: uğursuz cəhd — bir dəfə yenidən sınanılır (retry).")
+            return self._extract_chunk(prompt_text, strict=strict, _retry=False)
         return []

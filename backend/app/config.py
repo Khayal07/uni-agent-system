@@ -29,3 +29,7 @@ CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.75"))
 # Semantic dəyişiklik aşkarlama: mətn sahələrində oxşarlıq bu həddən yüksəkdirsə,
 # fərq "formatlaşma" sayılır və DƏYİŞİKLİK kimi qeyd olunmur (yanlış xəbərdarlıq azalır).
 SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.90"))
+
+# Orta etibarlılıq bu həddən aşağı olduqda extraction strict rejimdə bir dəfə təkrarlanır.
+# Token qənaəti üçün "false" ilə söndürülə bilər (OpenRouter free limit — 50/gün).
+EXTRACTION_RETRY_ENABLED = os.getenv("EXTRACTION_RETRY_ENABLED", "true").lower() == "true"

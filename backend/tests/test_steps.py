@@ -269,6 +269,45 @@ def test_chunk_text_covers_long_text_with_overlap():
     assert chunks[0][-100:] in chunks[1]
 
 
+def test_extract_chunk_retries_once_on_failure(monkeypatch):
+    """İlk cəhd uğursuz (parse olunmayan), ikinci cəhd uğurlu — retry işləməlidir."""
+    agent = ExtractionAgent()
+    agent.api_key = "test-key"
+    calls = {"n": 0}
+
+    class FakeResp:
+        def __init__(self, content, status=200):
+            self._c = content; self.status_code = status
+        def json(self):
+            return {"choices": [{"message": {"content": self._c}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakeResp("zibil cavab, json yoxdur")          # parse alınmır
+        return FakeResp('[{"program_name": "Maliyyə"}]')          # ikinci cəhd OK
+
+    monkeypatch.setattr("app.agents.extraction.requests.post", fake_post)
+    out = agent._extract_chunk("mətn")
+    assert calls["n"] == 2                       # bir dəfə retry olundu
+    assert out and out[0]["program_name"] == "Maliyyə"
+
+
+def test_extract_chunk_no_infinite_retry(monkeypatch):
+    """Həmişə uğursuzdursa, yalnız 2 cəhd (1 + 1 retry) olmalıdır."""
+    agent = ExtractionAgent()
+    agent.api_key = "test-key"
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["n"] += 1
+        raise RuntimeError("şəbəkə xətası")
+
+    monkeypatch.setattr("app.agents.extraction.requests.post", fake_post)
+    out = agent._extract_chunk("mətn")
+    assert calls["n"] == 2 and out == []
+
+
 def test_dedupe_removes_same_program_name():
     agent = ExtractionAgent()
     progs = [
